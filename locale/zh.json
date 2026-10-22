@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "title": "通用自动记忆",
+    "description": "跨工具、可编辑、自索引的长期记忆，注入 token 成本恒定可控。"
+  },
+  "panel": {
+    "title": "记忆",
+    "loading": "正在加载记忆…",
+    "empty": "还没有记忆。说点值得长期记住的事，或从其他工具导入。",
+    "error": "本视图渲染失败。",
+    "retry": "重试",
+    "hostUnavailable": "Host 路由不可用。工具与 slash 命令仍可正常使用。"
+  },
+  "nav": {
+    "overview": "总览",
+    "browse": "浏览",
+    "import": "导入",
+    "graph": "族谱",
+    "recovery": "恢复",
+    "audit": "审计"
+  },
+  "overview": {
+    "budget": "注入预算",
+    "budgetShare": "占请求比例",
+    "entries": "条目",
+    "cacheHealth": "前缀缓存健康",
+    "verbatimRate": "逐字节复读率",
+    "prefixBreaks": "前缀击穿次数",
+    "recent": "最近写入",
+    "recall": "召回",
+    "zeroHit": "零命中率",
+    "gated": "被门控裁掉",
+    "alerts": "告警",
+    "noAlerts": "一切正常。"
+  },
+  "browse": {
+    "search": "搜索记忆…",
+    "allKinds": "全部类型",
+    "noResults": "没有匹配的记忆。",
+    "hits": "次命中",
+    "open": "打开",
+    "source": "来源",
+    "confidence": "可信度"
+  },
+  "kind": {
+    "persona": "画像",
+    "preference": "偏好",
+    "feedback": "反馈",
+    "relations": "关系",
+    "project": "项目",
+    "reference": "参考",
+    "procedure": "程序",
+    "episode": "情景"
+  },
+  "import": {
+    "hint": "把其他 agent 的记忆文件与历史会话收编进来。扫描只读不写，导入前自动快照。",
+    "memory": "记忆文件",
+    "conversation": "历史会话 → 记忆",
+    "new": "新增",
+    "merge": "合并",
+    "duplicate": "已有",
+    "skipped": "跳过文件",
+    "selectAll": "全选",
+    "selectNone": "全不选",
+    "cancel": "取消",
+    "apply": "导入",
+    "done": "导入完成",
+    "added": "新增",
+    "updated": "更新",
+    "noop": "已存在",
+    "rejected": "被拦截",
+    "snapshot": "快照",
+    "budgetWarn": "常驻层将超预算"
+  },
+  "confirm": {
+    "prompt": "要记住这条吗？",
+    "accept": "记住",
+    "reject": "不要",
+    "edit": "改一下",
+    "autoDismiss": "{n} 秒后自动忽略"
+  }
+}

@@ -1,0 +1,132 @@
+import { open, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises'
+import path from 'node:path'
+import { toPosix } from './paths.js'
+
+export class PathEscapeError extends Error {
+  constructor(rel: string) {
+    super(`path escapes the memory root: ${rel}`)
+    this.name = 'PathEscapeError'
+  }
+}
+
+/**
+ * 把相对路径解析到 root 内，拒绝任何逃逸。
+ *
+ * dsh 的 Host 插件代码在进程内运行、**不受 workspace sandbox 约束**
+ * （`dsh-plugin-manager/README.md`: "installed Host code executes in-process outside the
+ * workspace sandbox"），所以边界必须我们自己守。面板路由与工具入参都先过这里。
+ */
+export function resolveInRoot(root: string, rel: string): string {
+  const rootAbs = path.resolve(root)
+  // 绝对路径也接受，但必须落在 root 内（面板传来的可能是完整路径）
+  const abs = path.isAbsolute(rel) ? path.resolve(rel) : path.resolve(rootAbs, toPosix(rel).replace(/^\/+/, ''))
+  const rootWithSep = rootAbs.endsWith(path.sep) ? rootAbs : rootAbs + path.sep
+  if (abs !== rootAbs && !abs.startsWith(rootWithSep)) throw new PathEscapeError(rel)
+  return abs
+}
+
+export async function ensureDir(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+}
+
+/**
+ * 原子写：临时文件 → fsync 文件 → rename → fsync 父目录。
+ * rename 是原子的，所以任何时刻读到的都是完整旧版或完整新版，不存在半写状态。
+ */
+export async function writeFileAtomic(abs: string, data: string): Promise<void> {
+  await ensureDir(path.dirname(abs))
+  const tmp = `${abs}.tmp.${process.pid}.${Date.now().toString(36)}`
+  let handle
+  try {
+    handle = await open(tmp, 'w', 0o600)
+    await handle.writeFile(data, 'utf8')
+    await handle.sync()
+  } finally {
+    await handle?.close()
+  }
+  try {
+    await rename(tmp, abs)
+  } catch (cause) {
+    await rm(tmp, { force: true })
+    throw cause
+  }
+  let dir
+  try {
+    dir = await open(path.dirname(abs), 'r')
+    await dir.sync()
+  } catch {
+    // 某些文件系统不允许打开目录做 fsync；rename 本身已原子，忽略即可
+  } finally {
+    await dir?.close()
+  }
+}
+
+export async function readTextFile(abs: string): Promise<string | null> {
+  try {
+    return await readFile(abs, 'utf8')
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw cause
+  }
+}
+
+export async function appendLine(abs: string, line: string): Promise<void> {
+  await ensureDir(path.dirname(abs))
+  let handle
+  try {
+    handle = await open(abs, 'a', 0o600)
+    await handle.writeFile(line.endsWith('\n') ? line : `${line}\n`, 'utf8')
+    await handle.sync()
+  } finally {
+    await handle?.close()
+  }
+}
+
+/** 递归收集 .md 文件的相对路径，返回结果按字典序排序（确定性，原则 P4）。 */
+export async function walkMarkdown(root: string, dirs: readonly string[]): Promise<string[]> {
+  const out: string[] = []
+  for (const dir of dirs) {
+    const abs = path.join(root, dir)
+    if (!(await isDirectory(abs))) continue
+    await walk(abs, root, out)
+  }
+  return out.sort()
+}
+
+async function walk(abs: string, root: string, out: string[]): Promise<void> {
+  let entries
+  try {
+    entries = await readdir(abs, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const child = path.join(abs, entry.name)
+    if (entry.isDirectory()) {
+      await walk(child, root, out)
+    } else if (entry.isFile() && entry.name.endsWith('.md') && !entry.name.endsWith('.tmp')) {
+      out.push(toPosix(path.relative(root, child)))
+    }
+  }
+}
+
+async function isDirectory(abs: string): Promise<boolean> {
+  try {
+    return (await stat(abs)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** 列出 root 下的直接子目录名（用于发现 projects/<slug>）。 */
+export async function listSubdirs(abs: string): Promise<string[]> {
+  try {
+    const entries = await readdir(abs, { withFileTypes: true })
+    return entries
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort()
+  } catch {
+    return []
+  }
+}

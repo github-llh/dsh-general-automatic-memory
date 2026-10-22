@@ -63,3 +63,14 @@ uploads/
 
 ### 新消监连接代理本机真实配置（含源站密钥与账号密码），覆盖 classpath 同名 profile 文件 ###
 /data-platform-service/data-platform-xxj-connector/config/
+
+### Node / TypeScript 插件工程 ###
+node_modules/
+lib/
+client/
+.tmp-client/
+*.tsbuildinfo
+coverage/
+dist/
+.DS_Store
+

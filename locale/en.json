@@ -1,0 +1,82 @@
+{
+  "meta": {
+    "title": "General Automatic Memory",
+    "description": "Cross-tool, human-editable, self-indexing long-term memory with a fixed token budget."
+  },
+  "panel": {
+    "title": "Memory",
+    "loading": "Loading memory…",
+    "empty": "No memories yet. Tell the agent something worth remembering, or import from another tool.",
+    "error": "This view failed to render.",
+    "retry": "Retry",
+    "hostUnavailable": "Host routes unavailable. Tools and slash commands still work."
+  },
+  "nav": {
+    "overview": "Overview",
+    "browse": "Browse",
+    "import": "Import",
+    "graph": "Genealogy",
+    "recovery": "Recovery",
+    "audit": "Audit"
+  },
+  "overview": {
+    "budget": "Injection budget",
+    "budgetShare": "Share of request",
+    "entries": "Entries",
+    "cacheHealth": "Prefix-cache health",
+    "verbatimRate": "Byte-identical rate",
+    "prefixBreaks": "Prefix breaks",
+    "recent": "Recent writes",
+    "recall": "Recall",
+    "zeroHit": "Zero-hit rate",
+    "gated": "Gated out",
+    "alerts": "Alerts",
+    "noAlerts": "All clear."
+  },
+  "browse": {
+    "search": "Search memories…",
+    "allKinds": "All kinds",
+    "noResults": "Nothing matched.",
+    "hits": "hits",
+    "open": "Open",
+    "source": "Source",
+    "confidence": "Confidence"
+  },
+  "kind": {
+    "persona": "Persona",
+    "preference": "Preference",
+    "feedback": "Feedback",
+    "relations": "Relations",
+    "project": "Project",
+    "reference": "Reference",
+    "procedure": "Procedure",
+    "episode": "Episode"
+  },
+  "import": {
+    "hint": "Bring in memory files and past conversations from other agents. Scan is read-only; a snapshot is taken before applying.",
+    "memory": "Memory files",
+    "conversation": "Conversations → memory",
+    "new": "New",
+    "merge": "Merge",
+    "duplicate": "Existing",
+    "skipped": "Skipped files",
+    "selectAll": "Select all",
+    "selectNone": "Select none",
+    "cancel": "Cancel",
+    "apply": "Import",
+    "done": "Import complete",
+    "added": "added",
+    "updated": "updated",
+    "noop": "already present",
+    "rejected": "blocked",
+    "snapshot": "Snapshot",
+    "budgetWarn": "Always layer will exceed budget"
+  },
+  "confirm": {
+    "prompt": "Remember this?",
+    "accept": "Remember",
+    "reject": "No",
+    "edit": "Edit",
+    "autoDismiss": "Ignored in {n}s"
+  }
+}

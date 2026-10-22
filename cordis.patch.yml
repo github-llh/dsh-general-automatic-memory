@@ -1,0 +1,5 @@
+# Bundle patch —— 由 dsh 安装器写入 profile，或用户手工合并进 cordis.patch.yml。
+# `name` 是包 specifier，靠 Node resolution 找已安装的包。
+- insert:
+    - id: general-memory
+      name: dsh-general-automatic-memory
