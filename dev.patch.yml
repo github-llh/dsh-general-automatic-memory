@@ -1,0 +1,5 @@
+# 本地开发用 overlay：`dsh web --patch /abs/path/to/dev.patch.yml`
+# 相对路径 specifier 锚定到本文件旁，因此不需要先安装进 profile 的 node_modules。
+- insert:
+    - id: general-memory
+      name: .
