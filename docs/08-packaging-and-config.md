@@ -35,7 +35,8 @@ dsh-general-automatic-memory/
 │       ├── components/           # 自写控件（.gam-* 前缀，从 primitive 拷贝改造，不 import 宿主包）
 │       ├── hooks/                # useGam / useGamMutation / useStore / useVirtualList
 │       └── styles/*.module.css
-├── lib/                          # 构建产物（进 files）
+├── lib/                          # 构建产物，随源码提交（git 安装零脚本）
+├── client/                       # client bundle 产物，随源码提交
 ├── test/
 │   ├── unit/                     # store / frontmatter / 决策 / 预算裁剪
 │   ├── contract/                 # ★ 逐字节幂等测试：同输入渲染 100 次字节一致
@@ -63,10 +64,9 @@ dsh-general-automatic-memory/
   "files": ["lib", "locale", "icon.svg", "cordis.patch.yml", "README.md", "README.zh.md"],
   "engines": { "dsh": ">=0.2.1-rc.2 <0.3.0", "node": "^22.19.0 || >=24.0.0" },
   "scripts": {
-    "build": "tsdown -c tsdown.config.ts && tsdown -c tsdown.client.ts",
-    "dev": "tsdown -c tsdown.client.ts --watch",
-    "test": "vitest run",
-    "lint": "oxlint src test"
+    "build": "npm run build:host && npm run build:client",
+    "check": "typecheck → build → verify → test → market verify",
+    "prepublishOnly": "npm run check"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",
@@ -111,6 +111,17 @@ dsh-general-automatic-memory/
 - `engines.dsh` 是 SemVer range，在**安装与 profile 启动两处强制**；声明了它就**只看它**（`peerDependencies` 被忽略）；空/非法 range（含 `workspace:`）视为不兼容 → 拒绝时报 `incompatible-version`
 - `dsh.manifestVersion` 当前 installer/loader **不强制校验**，但写上 `"manifestVersion": 1` 无害且面向未来
 - 子路径插件（如 `my-plugins/search`）不是包、不读 `package.json`，改为导出 `./search/locale/*.json` 与 `./search/icon` —— 我们不用子路径插件
+
+### 2.1 安装期零脚本（硬约束）
+
+dsh 的插件安装器在 profile 目录里执行 `pnpm add <spec>`，而 profile 的 `pnpm-workspace.yaml` 维护着一份手工 `allowBuilds` 白名单（本机只有 `onnxruntime-node` / `protobufjs` / `sharp`），安装器**不会**为插件自动追加。因此：
+
+- git 依赖只要带 `prepare`（或打包期的 `prepack`），pnpm 11 就直接拒绝：
+  `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED ... needs to execute build scripts but is not in the "allowBuilds" allowlist`
+- 所以本包**不声明任何安装期生命周期脚本**，`lib/` 与 `client/` 作为发布产物随源码提交，pnpm 拉下 tarball 即可用
+- 改源码后的固定动作是 `npm run build` + 一起提交产物；CI 在构建后用 `git status --porcelain -- lib client` 断言产物与源码同步，防止发出「源码新、产物旧」的提交
+- 这也是同机其他 GitHub 插件的共同做法：`@devilspiderx/dsh-chinese-thinking`、`dsh-sandbox-allowlist` 都提交了 `dist`/`lib` 且没有 `prepare`。`dsh-easyrewrite` 虽然有 `prepare`，但它从 npm registry 安装——registry tarball 不跑 `prepare`，与 git 安装是两条路径
+- `prepublishOnly` 保留（只在 `npm publish` 时跑 `check`），pnpm 安装 git 依赖时不会执行它
 
 ## 3. `cordis.patch.yml`
 

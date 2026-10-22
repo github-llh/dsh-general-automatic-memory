@@ -93,7 +93,7 @@
 | R14 | **组件抛错导致 slot 空白**（console 只留 `slot entry crashed in '<slot>'`，用户看到"点了没反应"） | 中 | 中 | 每视图 ErrorBoundary + 常驻诊断区 + schema 不匹配时明确提示重启 |
 | R15 | **前作用户迁移失败** | 低 | 中 | 导入器对锚点丢失、编码差异（`---Users-…--` vs `--Users-…--`）、空文件全部容错；dry-run 预检 + 快照 |
 | R16 | **官方不接受上游合并**（CONTRIBUTING 原文 *"We are sorry that we cannot accept external pull requests at the moment."*） | **确定** | 低 | 不指望上游；缺失的能力全部在自己插件内实现；用 Discussions 反馈 |
-| R17 | **client bundle 装载失败会带走整个 Desktop 进程**（discussion #10309 在 0.2.1-rc.2 上实测；官方未回应；用户的恢复手段只有「禁用所有第三方插件」） | 中 | **致命** | ① `test/bundle.test.ts` 用 `node:vm` 沙箱**真的执行**产物，断言能注册、factory 可调用、`apply` 在最小 ctx 上不抛；② 模块顶层零副作用（`document`/`fetch` 只在 `apply` 与组件内碰）；③ 只 `require("react")`，其余全打进 bundle，杜绝 combo 路由 404；④ `scripts/verify-bundle.mjs` 在 CI 与 `prepack` 双跑；⑤ README 写清「如何在不启动 Desktop 的情况下卸载本插件」（`dsh plugin remove` 走 CLI，不需要 GUI） |
+| R17 | **client bundle 装载失败会带走整个 Desktop 进程**（discussion #10309 在 0.2.1-rc.2 上实测；官方未回应；用户的恢复手段只有「禁用所有第三方插件」） | 中 | **致命** | ① `test/bundle.test.ts` 用 `node:vm` 沙箱**真的执行**产物，断言能注册、factory 可调用、`apply` 在最小 ctx 上不抛；② 模块顶层零副作用（`document`/`fetch` 只在 `apply` 与组件内碰）；③ 只 `require("react")`，其余全打进 bundle，杜绝 combo 路由 404；④ `scripts/verify-bundle.mjs` 在 CI 与 `npm run check` 双跑；⑤ README 写清「如何在不启动 Desktop 的情况下卸载本插件」（`dsh plugin remove` 走 CLI，不需要 GUI） |
 | R18 | **MCP 路线的竞品无法做注入与事件观察** —— 反过来说，如果我们哪天退化成 MCP server 就会失去核心差异化 | 低 | 高 | 架构上禁止把记忆能力做成 MCP server；`docs/01 §5.6` 已把这条写成差异化论证 |
 
 ## 3. 开放问题（需要实现期验证）
