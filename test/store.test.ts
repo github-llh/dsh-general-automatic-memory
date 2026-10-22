@@ -240,10 +240,18 @@ describe('service', () => {
 
   it('keeps the catalog within budget and records the injection share', async () => {
     const service = await createService()
-    for (let i = 0; i < 40; i++) {
-      await service.create({ kind: 'project', title: `条目 ${i}`, summary: `第 ${i} 条摘要`, body: 'b', scope: 'project', project: projectSlug('/repo/demo') })
-    }
-    const snapshot = service.snapshotFor('s1', { mode: 'full', project: projectSlug('/repo/demo') })
+    const slug = projectSlug('/repo/demo')
+    await service.createMany(
+      Array.from({ length: 40 }, (_, i) => ({
+        kind: 'project' as const,
+        title: `条目 ${i}`,
+        summary: `第 ${i} 条摘要`,
+        body: 'b',
+        scope: 'project' as const,
+        project: slug,
+      })),
+    )
+    const snapshot = service.snapshotFor('s1', { mode: 'full', project: slug })
     expect(snapshot.chars.total).toBeLessThanOrEqual(DEFAULT_CONFIG.budget.alwaysChars + DEFAULT_CONFIG.budget.catalogChars + DEFAULT_CONFIG.budget.globChars)
     service.setRequestShare(0.05)
     const stats = await service.stats()

@@ -198,6 +198,29 @@ export class MemoryService {
     return { meta: { ...meta, checksum: (await this.get(meta.id))?.meta.checksum ?? meta.checksum }, body: input.body, rel }
   }
 
+  /**
+   * 批量新增：**只刷新一次**。
+   *
+   * `create()` 每次都会全量 scan + 重建派生索引，N 条就是 O(N²)。Windows 上 40 条
+   * 就能把测试跑到 5s 超时。批量导入/灌测试数据必须走这条路。
+   */
+  async createMany(inputs: NewEntryInput[]): Promise<Entry[]> {
+    if (inputs.length === 0) return []
+    const written: Array<{ meta: Frontmatter; body: string; rel: string }> = []
+    for (const input of inputs) {
+      const meta = this.store.buildMeta(input)
+      const rel = await this.store.put(meta, input.body)
+      await this.writeAudit('write', { id: meta.id, kind: meta.kind, decision: 'ADD', src: meta.provenance.source, bytes: Buffer.byteLength(input.body, 'utf8'), rev: 1 })
+      written.push({ meta, body: input.body, rel })
+    }
+    await this.refresh()
+    return written.map(({ meta, body, rel }) => ({
+      meta: { ...meta, checksum: this.entries.find((entry) => entry.meta.id === meta.id)?.meta.checksum ?? meta.checksum },
+      body,
+      rel,
+    }))
+  }
+
   async update(id: string, body: string, expectedRev?: number): Promise<{ ok: true; entry: Entry } | { ok: false; reason: 'not-found' | 'stale'; currentRev?: number }> {
     const existing = await this.get(id)
     if (!existing) return { ok: false, reason: 'not-found' }
