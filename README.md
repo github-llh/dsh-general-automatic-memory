@@ -7,20 +7,45 @@
 当前状态：**M0 完成 + M1 主体完成，代码可构建、测试全绿，尚未在真实 dsh 里跑过**。
 
 ```
-typecheck ✓   build ✓ (host ~100 KB / client 34 KB)   bundle verify ✓ (只 require react)   tests 86/86 ✓
+typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只 require react)   tests 95/95 ✓
 ```
 
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
 | M0 骨架可加载 | ✅ | 清单、patch、client bundle 构建链（自己复刻 lazy-CJS）、locale、icon、bundle 格式校验 |
 | M1 格式 + 只读召回 | ✅ 主体 | 8 类目录、frontmatter 规范、原子写、`INDEX.md`/`PROFILE.md`/`graph.jsonl` 生成、L0 词法检索、三级注入、逐字节幂等、6 工具 + 3 命令、面板「总览/浏览」两个视图 |
-| M1 剩余 | ⬜ | L1 SQLite FTS5（现为纯 TS 词法检索）、真实 dsh 冒烟、glob 注入的真机校准 |
+| M1 剩余 | ⚠️ | L1 SQLite FTS5 已接（`node:sqlite`，可删可重建）；剩真实 dsh 冒烟与 glob 注入的真机校准 |
 | M2 自动写入 | ✅ 主体 | 规则抽取（8 类信号 + 相对日期转绝对）、来源门控（密钥/PII/敏感话题/突增熔断）、`ADD/UPDATE/INVALIDATE/NOOP`、episode 层、`suggest` 待确认队列（15s 超时=静默 NOOP）、compaction 抢救、审计 |
-| M2 剩余 | ⬜ | LLM 兜底抽取的契约未在真机验证；确认卡 UI 尚未接到会话输入区（接口已就绪） |
+| M2 剩余 | ⚠️ | 确认卡已挂到 `conversation.input.dock`；只剩 LLM 兜底抽取的 `ctx.llm.stream` 契约待真机复核 |
 | M4 导入 | ✅ 主体 | 10 个记忆源（Claude Code auto memory / CLAUDE.md / AGENTS.md / Cursor / Windsurf / Cline / Copilot / Gemini / 前作 / 任意目录）+ 4 个会话源（dsh 多帧 zstd / Claude Code jsonl / 通用 jsonl / 通用 Markdown）；dry-run 预检 + 快照 + 去重预览 |
-| M4 剩余 | ⬜ | 投影器（默认关闭、低优先级）、zip 导入导出 |
-| M5 固化恢复 | ⚠️ 部分 | 快照创建/列表已就绪；consolidate 合并、diff、回滚未做 |
-| M3 面板 | ⚠️ 部分 | 总览 / 浏览 / 导入 三个视图；族谱 / 时间线 / 审计 / 恢复 / 设置未做 |
+| M4 剩余 | ✅ | 投影器（受管区块、默认关闭）+ zip 导入导出 已补齐 |
+| M5 固化恢复 | ✅ 主体 | 快照（含 sha256 manifest）、diff、回滚（回滚前自动快照）、固化（合并近义/清理低质 summary/晋升重复主题/降级冷条目/episode 过期） |
+| M3 面板 | ✅ 主体 | 8 个视图：总览 / 浏览 / 导入 / 时间线（时点有效）/ 族谱（邻接表+Mermaid）/ 审计 / 恢复 / 设置；族谱暂未做力导向图 |
+
+## 安装（从 GitHub）
+
+```bash
+# 装进 desktop profile（也可以用 web profile）
+dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
+```
+
+首次安装时 pnpm 会在克隆里跑 `prepare`（类型检查 + 构建 `lib/` 与 `client/`），所以需要能装到 devDependencies，**大约 1 分钟**。如果卡在下载，换成官方源：
+
+```bash
+npm_config_registry=https://registry.npmjs.org dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
+```
+
+装完重启 dsh（替换已装包需要重启才生效），侧栏会出现「记忆」图标。
+
+**升级**：重复上面的 add（或 `dsh plugin remove` 后再 add）。`~/.dsh/memory` 里的数据不会动。
+
+**可选：上架到插件市场**。仓库里带了索引生成器：
+
+```bash
+npm run market        # 用当前 HEAD 生成 market/index.json（format:1，git 源钉 commit）
+```
+
+把 `market/index.json` 放到任意静态托管，在 dsh 的 Plugins → More → Custom plugin markets 里填它的 URL 即可。
 
 ## 本地开发
 

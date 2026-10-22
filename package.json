@@ -1,7 +1,7 @@
 {
   "name": "dsh-general-automatic-memory",
   "version": "0.1.0",
-  "description": "Cross-tool, human-editable, self-indexing long-term memory for DeepSeek Harness · 跨工具、可编辑、自索引的通用自动记忆",
+  "description": "dsh-exclusive memory hub: import every agent's memories and conversations, self-index, fixed token budget · 专属 dsh 的记忆中枢：收编各 agent 的记忆与会话",
   "type": "module",
   "icon": "icon.svg",
   "license": "MIT",
@@ -38,11 +38,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "verify": "node scripts/verify-bundle.mjs",
-    "check": "npm run typecheck && npm run build && npm run verify && npm run test",
-    "prepack": "npm run build && npm run verify"
+    "check": "npm run typecheck && npm run build && npm run verify && npm run test && npm run market -- --verify",
+    "prepack": "npm run build && npm run verify",
+    "prepare": "npm run build",
+    "market": "node scripts/make-market-index.mjs"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.0",
+    "fflate": "^0.8.3",
     "js-yaml": "^4.1.0"
   },
   "peerDependencies": {
@@ -75,5 +78,24 @@
         "@deepseek-ai/dsh-client-ui-slots"
       ]
     }
-  }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "memory",
+    "memory-import",
+    "recall",
+    "agents-md",
+    "self-indexing"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/github-llh/dsh-general-automatic-memory.git"
+  },
+  "homepage": "https://github.com/github-llh/dsh-general-automatic-memory#readme",
+  "bugs": {
+    "url": "https://github.com/github-llh/dsh-general-automatic-memory/issues"
+  },
+  "author": "github-llh"
 }

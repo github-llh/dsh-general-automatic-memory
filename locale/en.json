@@ -17,7 +17,9 @@
     "import": "Import",
     "graph": "Genealogy",
     "recovery": "Recovery",
-    "audit": "Audit"
+    "audit": "Audit",
+    "timeline": "Timeline",
+    "settings": "Settings"
   },
   "overview": {
     "budget": "Injection budget",
@@ -78,5 +80,34 @@
     "reject": "No",
     "edit": "Edit",
     "autoDismiss": "Ignored in {n}s"
+  },
+  "timeline": {
+    "asOf": "As of",
+    "hint": "Shows memories valid on that date (validFrom ≤ date < invalidatedAt) — answers “why did the agent decide that back then”."
+  },
+  "graph": {
+    "entity": "Filter by entity",
+    "empty": "No relations yet. Say “X owns Y” and one will be created."
+  },
+  "audit": {
+    "allActs": "All actions",
+    "empty": "No audit records for this day."
+  },
+  "recovery": {
+    "consolidate": "Consolidate",
+    "export": "Export zip",
+    "exported": "Exported",
+    "diff": "Diff of the two latest snapshots",
+    "snapshots": "Snapshots",
+    "noSnapshots": "No snapshots yet (created automatically before import/consolidation)",
+    "restore": "Restore",
+    "restored": "Restored"
+  },
+  "settings": {
+    "hint": "These values come from the dsh profile (cordis.patch.yml). Edit them in dsh Plugins / Settings; this view is read-only.",
+    "projections": "Optional: one-way projections",
+    "projectionHint": "Export memory into formats other tools read. Off by default — the value of this plugin is importing in, not sharing out.",
+    "applied": "Projected",
+    "applyEnabled": "Apply enabled projections"
   }
 }
