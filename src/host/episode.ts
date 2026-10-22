@@ -80,6 +80,47 @@ export class EpisodeStore {
     return out.sort((a, b) => (a.ts < b.ts ? -1 : 1))
   }
 
+  /** 发现所有项目 slug（curator 需要遍历它们做过期与晋升） */
+  async listProjects(): Promise<string[]> {
+    try {
+      const { readdir } = await import('node:fs/promises')
+      const entries = await readdir(resolveInRoot(this.root, DIRS.projects), { withFileTypes: true })
+      return entries.filter((e) => e.isDirectory()).map((e) => e.name).sort()
+    } catch {
+      return []
+    }
+  }
+
+  /** 标记某几条 episode 已被晋升为长期条目（重写当日文件，保留其余行） */
+  async markPromoted(slug: string, ids: string[], entryId: string, now: Date = new Date()): Promise<number> {
+    let updated = 0
+    const want = new Set(ids)
+    for (let i = 0; i < 8; i++) {
+      const date = new Date(now.getTime() - i * 86_400_000).toISOString().slice(0, 10)
+      const abs = resolveInRoot(this.root, this.rel(slug, date))
+      const text = await readTextFile(abs)
+      if (!text) continue
+      const lines = text.split('\n').filter((line) => line.trim().length > 0)
+      let touched = false
+      const next = lines.map((line) => {
+        try {
+          const episode = JSON.parse(line) as Episode
+          if (episode.v === 1 && want.has(episode.id) && episode.promoted === null) {
+            episode.promoted = entryId
+            touched = true
+            updated++
+            return JSON.stringify(episode)
+          }
+        } catch {
+          // 保留坏行原样，别在固化里丢数据
+        }
+        return line
+      })
+      if (touched) await writeFileAtomic(abs, `${next.join('\n')}\n`)
+    }
+    return updated
+  }
+
   /** 过期行移到 archive/episodes/<yyyy-mm>.jsonl，退出默认召回面但可检索 */
   async expire(slug: string, beforeDate: string): Promise<number> {
     let moved = 0

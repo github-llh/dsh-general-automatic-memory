@@ -4,7 +4,9 @@ import type { MemoryService } from '../api.js'
 import type { Ingestor } from '../ingest/index.js'
 import type { ImportService } from '../importers/index.js'
 import { resolveInRoot } from '../files.js'
-import { createSnapshot, listSnapshots } from '../snapshot.js'
+import { createSnapshot, diffSnapshots, listSnapshots, restoreSnapshot } from '../snapshot.js'
+import { applyProjection, exportZip, importZip, projectionTargets } from '../bridge.js'
+import { curate } from '../curator.js'
 import { DIRS } from '../paths.js'
 import { guard, queryOf, readJson, send } from './http.js'
 import type { HostContext, WebRequest, WebResponse } from '../types.js'
@@ -147,6 +149,121 @@ export function registerFeatures(
       }
     })
     send(res, 200, { date, total: lines.length, items })
+  })
+
+
+  // ---- 固化 -------------------------------------------------------------
+  route(
+    'consolidate',
+    async (_req, res) => {
+      const result = await curate(deps.api, deps.importer.configSnapshot)
+      send(res, 200, result)
+    },
+    true,
+  )
+
+  // ---- 快照 diff / 回滚 -------------------------------------------------
+  route('snapshot/diff', async (_req, res, query) => {
+    const a = query.get('a')
+    const b = query.get('b')
+    if (!a || !b) return send(res, 400, { error: 'a and b are required' })
+    send(res, 200, await diffSnapshots(deps.api.root, a, b))
+  })
+
+  route(
+    'snapshot/restore',
+    async (req, res) => {
+      const body = (await readJson(req)) ?? {}
+      const label = String(body.label ?? '')
+      if (!label) return send(res, 400, { error: 'label is required' })
+      const paths = Array.isArray(body.paths) ? body.paths.map(String) : undefined
+      const result = await restoreSnapshot(deps.api.root, label, paths)
+      await deps.api.refresh()
+      await deps.api.writeAudit('restore', { label, restored: result.restored, preSnapshot: result.preSnapshot })
+      send(res, 200, result)
+    },
+    true,
+  )
+
+  // ---- 投影（可选，默认关闭） -------------------------------------------
+  route('projections', async (_req, res, query) => {
+    const cwd = query.get('cwd') ?? process.cwd()
+    const enabled = deps.importer.configSnapshot.portability.projections
+    send(res, 200, {
+      cwd,
+      targets: projectionTargets(cwd).map((target) => ({ id: target.id, label: target.label, path: target.path, enabled: enabled[target.id] === true })),
+    })
+  })
+
+  route(
+    'projections/apply',
+    async (req, res) => {
+      const body = (await readJson(req)) ?? {}
+      const cwd = typeof body.cwd === 'string' ? body.cwd : process.cwd()
+      const wanted = Array.isArray(body.ids) ? body.ids.map(String) : Object.entries(deps.importer.configSnapshot.portability.projections).filter(([, on]) => on === true).map(([id]) => id)
+      const entries = deps.api.list()
+      const results = []
+      for (const target of projectionTargets(cwd)) {
+        if (!wanted.includes(target.id)) continue
+        results.push(await applyProjection(target, entries))
+      }
+      await deps.api.writeAudit('export', { projections: results.map((r) => r.target), changed: results.filter((r) => r.changed).length })
+      send(res, 200, { results })
+    },
+    true,
+  )
+
+  // ---- zip 导入导出 -----------------------------------------------------
+  route(
+    'export',
+    async (req, res) => {
+      const body = (await readJson(req)) ?? {}
+      const result = await exportZip(deps.api.root, { includePii: body.includePii === true })
+      await deps.api.writeAudit('export', { path: result.path, files: result.files, excluded: result.excluded })
+      send(res, 200, result)
+    },
+    true,
+  )
+
+  route(
+    'import/zip',
+    async (req, res) => {
+      const body = (await readJson(req)) ?? {}
+      const zipPath = String(body.path ?? '')
+      if (!zipPath) return send(res, 400, { error: 'path is required' })
+      const pre = await createSnapshot(deps.api.root, 'pre-zip-import')
+      const result = await importZip(deps.api.root, zipPath)
+      await deps.api.refresh()
+      await deps.api.writeAudit('import', { source: 'zip', zipPath, restored: result.restored, skipped: result.skipped, snapshot: pre.label })
+      send(res, 200, { ...result, preSnapshot: pre.label })
+    },
+    true,
+  )
+
+  // ---- 族谱 / 配置 ------------------------------------------------------
+  route('graph', async (_req, res, query) => {
+    const entity = query.get('entity')
+    const edges = deps.api
+      .list()
+      .filter((entry) => entry.meta.kind === 'relations' && entry.meta.temporal.invalidatedAt === null)
+      .filter((entry) => (entity ? entry.meta.entities.includes(entity) || entry.meta.id === entity : true))
+      .map((entry) => ({
+        id: entry.meta.id,
+        from: entry.meta.entities[0] ?? '',
+        to: entry.meta.entities[1] ?? '',
+        rel: entry.meta.title,
+        confidence: entry.meta.confidence,
+        summary: entry.meta.summary,
+      }))
+      .filter((edge) => edge.from && edge.to)
+    const nodes = [...new Set(edges.flatMap((edge) => [edge.from, edge.to]))].sort()
+    const mermaid = ['graph LR', ...edges.map((edge, index) => `  n${index}a["${edge.from}"] -->|${edge.rel}| n${index}b["${edge.to}"]`)].join('\n')
+    send(res, 200, { nodes, edges, mermaid })
+  })
+
+  route('config', async (_req, res) => {
+    const config = deps.importer.configSnapshot
+    send(res, 200, { ...config, memoryRoot: deps.api.root, indexBackend: deps.api.indexBackend })
   })
 
   return () => {

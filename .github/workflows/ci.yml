@@ -1,0 +1,21 @@
+name: ci
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: corepack prepare pnpm@11.28.5 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: npm run check
+      - name: bundle must stay loadable
+        run: node -e "const s=require('fs').readFileSync('client/client.js','utf8'); if(!s.startsWith('window.__ModuleLoader__.load({')) process.exit(1)"

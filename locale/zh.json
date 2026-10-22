@@ -17,7 +17,9 @@
     "import": "导入",
     "graph": "族谱",
     "recovery": "恢复",
-    "audit": "审计"
+    "audit": "审计",
+    "timeline": "时间线",
+    "settings": "设置"
   },
   "overview": {
     "budget": "注入预算",
@@ -78,5 +80,34 @@
     "reject": "不要",
     "edit": "改一下",
     "autoDismiss": "{n} 秒后自动忽略"
+  },
+  "timeline": {
+    "asOf": "查看日期",
+    "hint": "显示「当时有效」的记忆（validFrom ≤ 日期 < invalidatedAt），用来回答“为什么那时候做了那个决定”。"
+  },
+  "graph": {
+    "entity": "按实体过滤",
+    "empty": "还没有关系记忆。说一句“谁负责什么”就会生成。"
+  },
+  "audit": {
+    "allActs": "全部动作",
+    "empty": "这一天没有审计记录。"
+  },
+  "recovery": {
+    "consolidate": "固化",
+    "export": "导出 zip",
+    "exported": "已导出",
+    "diff": "最近两次快照差异",
+    "snapshots": "快照",
+    "noSnapshots": "还没有快照（导入/固化前会自动创建）",
+    "restore": "回滚",
+    "restored": "已恢复"
+  },
+  "settings": {
+    "hint": "配置值来自 dsh 的 profile（cordis.patch.yml）。改配置请用 dsh 的 Plugins / Settings 页，面板这里只读。",
+    "projections": "可选：单向投影",
+    "projectionHint": "把记忆导出成其他工具能读的格式。默认关闭——本插件的价值在“导入进来”，不在“共享出去”。",
+    "applied": "已投影",
+    "applyEnabled": "应用已启用的投影"
   }
 }

@@ -66,9 +66,10 @@ uploads/
 
 ### Node / TypeScript 插件工程 ###
 node_modules/
-lib/
-client/
-.tmp-client/
+/lib/
+/client/
+/.tmp-client/
+/market/index.json
 *.tsbuildinfo
 coverage/
 dist/

@@ -9,6 +9,7 @@ import { SnapshotCache, Throttle, renderCatalogLayer, renderSnapshot, type Injec
 import { buildCorpus, rank, type Corpus, type Ranked } from './search.js'
 import { MemoryStore, type NewEntryInput, type ScanIssue } from './store.js'
 import { EpisodeStore } from './episode.js'
+import { FtsIndex } from './fts.js'
 import type { MemoryConfig } from './model.js'
 import { DIRS } from './paths.js'
 
@@ -54,6 +55,7 @@ const EMPTY_RECALL: RecallStats = {
 export class MemoryService {
   readonly store: MemoryStore
   readonly episodes: EpisodeStore
+  private fts: FtsIndex | null = null
   private entries: Entry[] = []
   private issues: ScanIssue[] = []
   private corpus: Corpus = { docs: new Map(), df: new Map(), size: 0 }
@@ -84,6 +86,16 @@ export class MemoryService {
     return this.loaded
   }
 
+  get indexBackend(): 'l0' | 'l1' {
+    return this.fts ? 'l1' : 'l0'
+  }
+
+  /** 插件卸载时释放 sqlite 句柄 */
+  dispose(): void {
+    this.fts?.close()
+    this.fts = null
+  }
+
   /** 重新扫描条目并重建派生索引。写入后调用；启动时调用一次。 */
   async refresh(): Promise<void> {
     const { entries, issues } = await this.store.scan()
@@ -92,6 +104,15 @@ export class MemoryService {
     this.corpus = buildCorpus(entries)
     this.indexText = renderIndex(entries)
     this.loaded = true
+    // L1 索引是缓存：每次 refresh 增量同步，失败也不影响主流程
+    if (this.config.retrieval.backend !== 'l0') {
+      this.fts ??= FtsIndex.open(this.root)
+      try {
+        this.fts?.sync(entries)
+      } catch {
+        this.fts = null
+      }
+    }
     // 派生文件被外部改动（用户手改 / 其他工具写入）时也要跟上，所以每次都 rebuild
     await this.rebuildDerived()
     for (const listener of this.listeners) listener()
@@ -153,7 +174,13 @@ export class MemoryService {
               (opts.kind === undefined || e.meta.kind === opts.kind) &&
               (opts.project === undefined || e.meta.project === opts.project || e.meta.scope === 'global'),
           )
-    const ranked = rank(pool, query, this.corpus)
+    // L1 粗筛：先用 FTS5 把候选压到几百条，再走完整排序。不可用时静默降级到 L0。
+    let candidates = pool
+    if (query.trim() && this.fts) {
+      const ids = new Set(this.fts.candidates(query, 400))
+      if (ids.size > 0) candidates = pool.filter((entry) => ids.has(entry.meta.id))
+    }
+    const ranked = rank(candidates, query, this.corpus)
     const threshold = this.config.retrieval.gateThreshold
     return ranked.slice(0, Math.max(limit, ranked.length)).map((r) => ({ ...r, gated: query.trim() !== '' && r.score < threshold }))
   }
