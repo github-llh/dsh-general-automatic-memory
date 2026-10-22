@@ -232,7 +232,9 @@
     "scanRoot": "扫描目录",
     "alreadyImported": "已导入过",
     "alreadyImportedHint": "这些条目此前已从同一来源导入，本次直接跳过",
-    "alreadyImportedNote": "已导入过的条目不再进入列表，避免重复冗余；来源文件新增内容仍会被扫出来。"
+    "alreadyImportedNote": "已导入过的条目不再进入列表，避免重复冗余；来源文件新增内容仍会被扫出来。",
+    "noMinedItems": "这个来源没有可导入的记忆",
+    "noMinedItemsDesc": "扫描成功，但内容里没有可抽取的长期记忆（例如纯闲聊的会话）。"
   },
   "confirm": {
     "prompt": "要记住这条吗？",

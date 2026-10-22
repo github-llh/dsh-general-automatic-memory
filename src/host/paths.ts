@@ -31,6 +31,20 @@ export function expandUserPath(p: string): string {
   return p
 }
 
+/**
+ * 桌面应用的数据目录（Electron app.getPath('userData')）：
+ * macOS `~/Library/Application Support/<name>`，Windows `%APPDATA%/<name>`，
+ * Linux `~/.config/<name>`。CherryStudio 等桌面端的记忆与会话都在这儿。
+ */
+export function appDataDir(name: string): string {
+  if (process.platform === 'win32') {
+    const base = process.env.APPDATA ?? path.join(homedir(), 'AppData', 'Roaming')
+    return path.join(base, name)
+  }
+  if (process.platform === 'darwin') return path.join(homedir(), 'Library', 'Application Support', name)
+  return path.join(homedir(), '.config', name)
+}
+
 /** 真相源与派生物（docs/03 §3）。`.cache` 永不参与同步，随时可删。 */
 export const DIRS = {
   persona: 'persona',

@@ -7,6 +7,7 @@ import { expandUserPath } from '../paths.js'
 import { extractFromTurn, type Candidate } from '../ingest/extract.js'
 import type { ImportItem, ScanOptions, SkippedFile, SourceDescriptor } from './types.js'
 import { clip, hasPii } from './types.js'
+import { DATABASE_SOURCES } from './databases.js'
 
 /**
  * 会话 → 记忆。
@@ -75,6 +76,14 @@ async function readMaybeZstd(abs: string): Promise<string | null> {
 async function isDir(target: string): Promise<boolean> {
   try {
     return (await stat(target)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+async function fileExists(target: string): Promise<boolean> {
+  try {
+    return (await stat(target)).isFile()
   } catch {
     return false
   }
@@ -214,6 +223,85 @@ export function parseCodexSession(text: string, origin: string): ConversationTur
   return turns
 }
 
+/**
+ * Gemini CLI / Qwen Code 的会话：`tmp/<project_hash>/chats/session-*.jsonl`。
+ *
+ * 混合记录流：首行 SessionMetadataRecord，随后 MessageRecord
+ * （`{id, timestamp, type: 'user'|'gemini', content}`）与 `{$set: …}` 元数据更新
+ * 交错；`info/error/warning` 是系统记录，跳过。content 是展开后的文本，
+ * 个别版本是 parts 数组，两种都容。
+ */
+export function parseGeminiSession(text: string, origin: string): ConversationTurn[] {
+  const turns: ConversationTurn[] = []
+  let current: ConversationTurn | null = null
+  const flush = () => {
+    if (current && current.userMessages.length > 0) turns.push(current)
+    current = null
+  }
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    let record: { type?: string; content?: unknown }
+    try {
+      record = JSON.parse(line) as typeof record
+    } catch {
+      continue
+    }
+    const type = record.type ?? ''
+    const content = textOfContent(record.content)
+    if (type === 'user') {
+      flush()
+      if (!content) continue
+      current = { index: turns.length, userMessages: [content], assistantMessages: [], origin }
+    } else if (type === 'gemini' || type === 'model' || type === 'assistant') {
+      if (!content) continue
+      if (!current) current = { index: turns.length, userMessages: [], assistantMessages: [], origin }
+      current.assistantMessages.push(content)
+    }
+  }
+  flush()
+  return turns
+}
+
+/** Gemini CLI 系（gemini-cli 与它的分支 qwen-code）会话目录：`<home>/tmp/<hash>/chats/` */
+function geminiFamilySource(id: 'gemini-sessions' | 'qwen-sessions', label: string, root: () => string): SourceDescriptor {
+  const files = async (): Promise<string[]> =>
+    collectSessionFiles(root(), (name) => name.toLowerCase().startsWith('session-') && (hasExtension(name, '.jsonl') || hasExtension(name, '.json')))
+  return {
+    id,
+    label,
+    kind: 'conversation',
+    async detect() {
+      const found = await files()
+      return found.length > 0 ? [root()] : []
+    },
+    async scan(_cwd, options) {
+      const items: ImportItem[] = []
+      const skipped: SkippedFile[] = []
+      for (const abs of await files()) {
+        if (items.length >= options.limit) break
+        const text = await readMaybeZstd(abs)
+        if (!text) {
+          skipped.push({ origin: abs, reason: 'unreadable' })
+          continue
+        }
+        const turns = parseGeminiSession(text, abs)
+        for (const entry of mineTurns(turns, { ...options, limit: options.limit - items.length, maxTurns: options.maxTurns })) {
+          items.push({ ...entry, source: id, key: `${id}:${path.basename(abs)}:${items.length}` })
+        }
+      }
+      return { items, skipped }
+    },
+  }
+}
+
+const geminiSessions = geminiFamilySource('gemini-sessions', 'Gemini CLI 历史会话（chats/*.jsonl）', () =>
+  path.join(process.env.GEMINI_CLI_HOME?.trim() || path.join(homedir(), '.gemini'), 'tmp'),
+)
+
+const qwenSessions = geminiFamilySource('qwen-sessions', 'Qwen Code 历史会话（chats/*.jsonl）', () =>
+  path.join(homedir(), '.qwen', 'tmp'),
+)
+
 /** 通用 jsonl：`{role, content}` 或 `{type, message}` */
 export function parseGenericJsonl(text: string, origin: string): ConversationTurn[] {
   const turns: ConversationTurn[] = []
@@ -242,11 +330,11 @@ export function parseGenericJsonl(text: string, origin: string): ConversationTur
   return turns
 }
 
-/** 导出的 Markdown 对话：按 `## User` / `## Assistant` 切 */
+/** 导出的 Markdown 对话：按 `## User` / `## Assistant` 切（aider 用 `####`，故放到 6 级） */
 export function parseMarkdownConversation(text: string, origin: string): ConversationTurn[] {
   const turns: ConversationTurn[] = []
-  const blocks = text.split(/^#{1,3}\s*(?:user|human|用户|assistant|ai|助手)\s*$/im)
-  const roles = [...text.matchAll(/^#{1,3}\s*(user|human|用户|assistant|ai|助手)\s*$/gim)].map((m) => (m[1] ?? '').toLowerCase())
+  const blocks = text.split(/^#{1,6}\s*(?:user|human|用户|assistant|ai|助手)\s*$/im)
+  const roles = [...text.matchAll(/^#{1,6}\s*(user|human|用户|assistant|ai|助手)\s*$/gim)].map((m) => (m[1] ?? '').toLowerCase())
   let current: ConversationTurn | null = null
   for (let index = 1; index < blocks.length; index++) {
     const role = roles[index - 1] ?? ''
@@ -501,6 +589,28 @@ async function collectQoderSessionFiles(): Promise<string[]> {
   return out
 }
 
+/**
+ * Aider 的对话历史：`~/.aider.chat.history.md`，`# aider chat started at …`
+ * 开头，角色用 `#### user` / `#### assistant` 四级标题。
+ */
+const aiderHistory: SourceDescriptor = {
+  id: 'aider-history',
+  label: 'Aider 对话历史（.aider.chat.history.md）',
+  kind: 'conversation',
+  async detect() {
+    const abs = path.join(homedir(), '.aider.chat.history.md')
+    return (await fileExists(abs)) ? [abs] : []
+  },
+  async scan(_cwd, options) {
+    const abs = path.join(homedir(), '.aider.chat.history.md')
+    const text = await readMaybeZstd(abs)
+    if (!text) return { items: [], skipped: [{ origin: abs, reason: 'unreadable' }] }
+    const turns = parseMarkdownConversation(text, abs)
+    const items = mineTurns(turns, options).map((entry, index) => ({ ...entry, source: 'aider-history' as const, key: `aider-history:${index}` }))
+    return { items, skipped: [] }
+  },
+}
+
 const genericConversation = (id: 'generic-jsonl' | 'generic-markdown', label: string): SourceDescriptor => ({
   id,
   label,
@@ -525,6 +635,10 @@ export const CONVERSATION_SOURCES: SourceDescriptor[] = [
   claudeSessions,
   codexSessions,
   qoderSessions,
+  geminiSessions,
+  qwenSessions,
+  aiderHistory,
+  ...DATABASE_SOURCES,
   genericConversation('generic-jsonl', '通用 jsonl 对话'),
   genericConversation('generic-markdown', '导出的 Markdown 对话'),
 ]

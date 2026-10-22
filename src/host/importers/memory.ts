@@ -8,6 +8,7 @@ import {
   classify,
   clip,
   hasPii,
+  makeImportItem,
   mapClaudeType,
   readFrontmatter,
   splitSections,
@@ -71,39 +72,6 @@ async function readText(abs: string): Promise<string | null> {
   }
 }
 
-function keyOf(source: ImportSourceId, origin: string, index: number): string {
-  return `${source}:${path.basename(origin)}:${index}`
-}
-
-function item(input: {
-  source: ImportSourceId
-  origin: string
-  index: number
-  title: string
-  summary: string
-  body: string
-  kind: Kind
-  activation: Activation
-  tags?: string[]
-  confidence?: ImportItem['confidence']
-  entities?: string[]
-}): ImportItem {
-  return {
-    key: keyOf(input.source, input.origin, input.index),
-    source: input.source,
-    origin: input.origin,
-    kind: input.kind,
-    title: clip(input.title || '(untitled)', 40),
-    summary: clip(input.summary || input.body, 120),
-    body: input.body.trim(),
-    entities: input.entities ?? [],
-    tags: input.tags ?? [],
-    confidence: input.confidence ?? 'medium',
-    activation: input.activation,
-    pii: hasPii(input.body),
-  }
-}
-
 /** 一个 Markdown 文件 → 若干条目（按二级标题切分，每节独立成条） */
 function fromMarkdownFile(
   source: ImportSourceId,
@@ -116,7 +84,7 @@ function fromMarkdownFile(
   sections.forEach((section, index) => {
     const guess = classify(`${section.title}\n${section.body}`)
     out.push(
-      item({
+      makeImportItem({
         source,
         origin,
         index,
@@ -157,7 +125,7 @@ async function scanAutoMemoryDirs(
       }
       const kind = mapClaudeType(data.type)
       items.push(
-        item({
+        makeImportItem({
           source,
           origin: abs,
           index: 0,
@@ -247,6 +215,50 @@ async function listUserProjectDirs(sub: string): Promise<string[]> {
 // ---------------------------------------------------------------------------
 // 2/3. CLAUDE.md 与 AGENTS.md 层级
 // ---------------------------------------------------------------------------
+
+/**
+ * 规则 / 指导文件来源：候选既可以是单文件（.clinerules、guidelines.md），
+ * 也可以是目录（.roo/rules、.kiro/steering、.specstory/history、.continue/rules）。
+ */
+function rulesSource(
+  id: ImportSourceId,
+  label: string,
+  candidates: (cwd: string) => string[],
+  tags: string[],
+): SourceDescriptor {
+  return {
+    id,
+    label,
+    kind: 'memory',
+    async detect(cwd) {
+      const found: string[] = []
+      for (const candidate of candidates(cwd)) if (await exists(candidate)) found.push(candidate)
+      return found
+    },
+    async scan(cwd, options) {
+      const items: ImportItem[] = []
+      const skipped: SkippedFile[] = []
+      for (const candidate of candidates(cwd)) {
+        if (items.length >= options.limit) break
+        const files = (await isDir(candidate)) ? await listFiles(candidate, ['.md'], true) : (await exists(candidate) ? [candidate] : [])
+        for (const abs of files) {
+          if (items.length >= options.limit) break
+          const text = await readText(abs)
+          if (!text?.trim()) {
+            skipped.push({ origin: abs, reason: 'empty' })
+            continue
+          }
+          for (const entry of fromMarkdownFile(id, abs, text, { tags: ['imported', ...tags] })) {
+            if (items.length >= options.limit) break
+            items.push(entry)
+          }
+        }
+      }
+      return { items, skipped }
+    },
+  }
+}
+
 function instructionSource(id: ImportSourceId, label: string, candidates: (cwd: string) => string[], tags: string[]): SourceDescriptor {
   return {
     id,
@@ -287,51 +299,124 @@ const agentsMd = instructionSource(
   (cwd) => [
     path.join(HOME(), '.agents', 'AGENTS.md'),
     path.join(HOME(), '.codex', 'AGENTS.md'),
+    path.join(HOME(), '.config', 'mimocode', 'AGENTS.md'),
     path.join(cwd, 'AGENTS.md'),
     path.join(cwd, 'AGENTS.local.md'),
   ],
   ['agents-md'],
 )
 
+// Qwen Code 与 iFlow 的指令文件（分别是阿里与心流的 CLI，格式同 GEMINI.md 一脉）
+const qwenMd = instructionSource(
+  'qwen-md',
+  'QWEN.md（Qwen Code）',
+  (cwd) => [path.join(HOME(), '.qwen', 'QWEN.md'), path.join(cwd, 'QWEN.md')],
+  ['qwen'],
+)
+
+const iflowMd = instructionSource(
+  'iflow-md',
+  'IFLOW.md（iFlow CLI）',
+  (cwd) => [path.join(HOME(), '.iflow', 'IFLOW.md'), path.join(cwd, 'IFLOW.md')],
+  ['iflow'],
+)
+
+// Cline / Roo 的项目规则（.clinerules 单文件 + .roo/rules 目录）
+const clineRules = rulesSource(
+  'clinerules',
+  'Cline / Roo 规则（.clinerules、.roo/rules）',
+  (cwd) => [path.join(cwd, '.clinerules'), path.join(cwd, '.roo', 'rules')],
+  ['cline'],
+)
+
+// Augment 用户规则（家目录）与项目规则
+const augmentRules = rulesSource(
+  'augment-rules',
+  'Augment rules',
+  (cwd) => [path.join(HOME(), '.augment', 'rules'), path.join(cwd, '.augment', 'rules')],
+  ['augment'],
+)
+
+// Kiro 的 steering 文档（规格驱动 IDE 的长期记忆机制）
+const kiroSteering = rulesSource(
+  'kiro-steering',
+  'Kiro steering（.kiro/steering）',
+  (cwd) => [path.join(cwd, '.kiro', 'steering')],
+  ['kiro'],
+)
+
+// SpecStory 把 AI 对话历史落成 Markdown，是最容易被忽视的「记忆矿」
+const specstoryHistory = rulesSource(
+  'specstory-history',
+  'SpecStory 历史（.specstory/history）',
+  (cwd) => [path.join(cwd, '.specstory', 'history')],
+  ['specstory'],
+)
+
+// Continue 的项目规则目录
+const continueRules = rulesSource(
+  'continue-rules',
+  'Continue rules（.continue/rules）',
+  (cwd) => [path.join(cwd, '.continue', 'rules')],
+  ['continue'],
+)
+
+// JetBrains Junie 的 guidelines
+const junieGuidelines = rulesSource(
+  'junie-guidelines',
+  'Junie guidelines（.junie）',
+  (cwd) => [path.join(cwd, '.junie', 'guidelines.md')],
+  ['junie'],
+)
+
 // ---------------------------------------------------------------------------
-// 4. Cursor rules
+// 4. Cursor rules（.cursor/rules 目录 + 旧版 .cursorrules 单文件）
 // ---------------------------------------------------------------------------
+function cursorCandidates(cwd: string): string[] {
+  return [path.join(cwd, '.cursor', 'rules'), path.join(cwd, '.cursorrules')]
+}
+
 const cursorRules: SourceDescriptor = {
   id: 'cursor-rules',
   label: 'Cursor rules (.cursor/rules)',
   kind: 'memory',
   async detect(cwd) {
-    return (await exists(path.join(cwd, '.cursor', 'rules'))) ? [path.join(cwd, '.cursor', 'rules')] : []
+    const found: string[] = []
+    for (const candidate of cursorCandidates(cwd)) if (await exists(candidate)) found.push(candidate)
+    return found
   },
   async scan(cwd, options) {
     const items: ImportItem[] = []
     const skipped: SkippedFile[] = []
-    for (const abs of await listFiles(path.join(cwd, '.cursor', 'rules'), ['.mdc', '.md'])) {
-      if (items.length >= options.limit) break
-      const text = await readText(abs)
-      if (!text) continue
-      const { data, body } = readFrontmatter(text)
-      if (!body.trim()) {
-        skipped.push({ origin: abs, reason: 'empty' })
-        continue
+    for (const candidate of cursorCandidates(cwd)) {
+      const files = (await isDir(candidate)) ? await listFiles(candidate, ['.mdc', '.md']) : (await exists(candidate) ? [candidate] : [])
+      for (const abs of files) {
+        if (items.length >= options.limit) break
+        const text = await readText(abs)
+        if (!text) continue
+        const { data, body } = readFrontmatter(text)
+        if (!body.trim()) {
+          skipped.push({ origin: abs, reason: 'empty' })
+          continue
+        }
+        const globs = Array.isArray(data.globs) ? data.globs.map(String) : data.globs ? [String(data.globs)] : []
+        const always = data.alwaysApply === true || data.alwaysApply === 'true'
+        const activation: Activation = always ? 'always' : globs.length > 0 ? 'glob' : 'on_demand'
+        const kind = classify(`${body}`).kind
+        items.push(
+          makeImportItem({
+            source: 'cursor-rules',
+            origin: abs,
+            index: 0,
+            title: String(data.description ?? path.basename(abs).replace(/\.(mdc|md)$/, '')),
+            summary: String(data.description ?? body),
+            body,
+            kind,
+            activation,
+            tags: ['imported', 'cursor', ...(globs.length > 0 ? ['glob'] : [])],
+          }),
+        )
       }
-      const globs = Array.isArray(data.globs) ? data.globs.map(String) : data.globs ? [String(data.globs)] : []
-      const always = data.alwaysApply === true || data.alwaysApply === 'true'
-      const activation: Activation = always ? 'always' : globs.length > 0 ? 'glob' : 'on_demand'
-      const kind = classify(`${body}`).kind
-      items.push(
-        item({
-          source: 'cursor-rules',
-          origin: abs,
-          index: 0,
-          title: String(data.description ?? path.basename(abs).replace(/\.(mdc|md)$/, '')),
-          summary: String(data.description ?? body),
-          body,
-          kind,
-          activation,
-          tags: ['imported', 'cursor', ...(globs.length > 0 ? ['glob'] : [])],
-        }),
-      )
     }
     return { items, skipped }
   },
@@ -372,7 +457,7 @@ const windsurfRules: SourceDescriptor = {
       const activation: Activation = trigger === 'always_on' ? 'always' : trigger === 'manual' ? 'manual' : 'on_demand'
       const kind = classify(body).kind
       items.push(
-        item({
+        makeImportItem({
           source: 'windsurf-rules',
           origin: abs,
           index: 0,
@@ -413,7 +498,7 @@ const clineMemoryBank: SourceDescriptor = {
       const kind: Kind = 'project'
       const activation: Activation = 'on_demand'
       items.push(
-        item({
+        makeImportItem({
           source: 'cline-memory-bank',
           origin: abs,
           index: 0,
@@ -459,7 +544,7 @@ const copilotInstructions: SourceDescriptor = {
       const { data, body } = readFrontmatter(text)
       const applyTo = data.applyTo ? [String(data.applyTo)] : []
       items.push(
-        item({
+        makeImportItem({
           source: 'copilot-instructions',
           origin: abs,
           index: 0,
@@ -565,8 +650,16 @@ export const MEMORY_SOURCES: SourceDescriptor[] = [
   cursorRules,
   windsurfRules,
   clineMemoryBank,
+  clineRules,
   copilotInstructions,
   geminiMd,
+  qwenMd,
+  iflowMd,
+  augmentRules,
+  kiroSteering,
+  specstoryHistory,
+  continueRules,
+  junieGuidelines,
   qoderMemory,
   dshAutoMemory,
   genericDir,

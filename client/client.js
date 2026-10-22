@@ -241,7 +241,9 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"scanRoot": "Scan root",
 			"alreadyImported": "Already imported",
 			"alreadyImportedHint": "These entries were imported from the same source before and are skipped",
-			"alreadyImportedNote": "Already-imported entries stay out of the list to avoid redundancy; new content in the same source is still picked up."
+			"alreadyImportedNote": "Already-imported entries stay out of the list to avoid redundancy; new content in the same source is still picked up.",
+			"noMinedItems": "Nothing importable in this source",
+			"noMinedItemsDesc": "The scan succeeded but found no long-term memory to extract (e.g. a small-talk-only conversation)."
 		},
 		confirm: {
 			"prompt": "Remember this?",
@@ -769,7 +771,9 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"scanRoot": "扫描目录",
 			"alreadyImported": "已导入过",
 			"alreadyImportedHint": "这些条目此前已从同一来源导入，本次直接跳过",
-			"alreadyImportedNote": "已导入过的条目不再进入列表，避免重复冗余；来源文件新增内容仍会被扫出来。"
+			"alreadyImportedNote": "已导入过的条目不再进入列表，避免重复冗余；来源文件新增内容仍会被扫出来。",
+			"noMinedItems": "这个来源没有可导入的记忆",
+			"noMinedItemsDesc": "扫描成功，但内容里没有可抽取的长期记忆（例如纯闲聊的会话）。"
 		},
 		confirm: {
 			"prompt": "要记住这条吗？",
@@ -8628,7 +8632,11 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 							})
 						]
 					}),
-					visibleItems.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EmptyState, {
+					visibleItems.length === 0 ? scan.items.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EmptyState, {
+						icon: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconFile, { size: 20 }),
+						title: t("import.noMinedItems"),
+						description: scan.skipped.length > 0 ? `${t("import.noMinedItemsDesc")}（${t("import.skipped")} ${scan.skipped.length}）` : t("import.noMinedItemsDesc")
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EmptyState, {
 						icon: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconFile, { size: 20 }),
 						title: t("import.noItems"),
 						description: t("import.noItemsDesc")

@@ -1568,7 +1568,19 @@ function ImportView(props: CommonProps): ReactNode {
           </div>
 
           {visibleItems.length === 0 ? (
-            <EmptyState icon={<IconFile size={20} />} title={t('import.noItems')} description={t('import.noItemsDesc')} />
+            scan.items.length === 0 ? (
+              <EmptyState
+                icon={<IconFile size={20} />}
+                title={t('import.noMinedItems')}
+                description={
+                  scan.skipped.length > 0
+                    ? `${t('import.noMinedItemsDesc')}（${t('import.skipped')} ${scan.skipped.length}）`
+                    : t('import.noMinedItemsDesc')
+                }
+              />
+            ) : (
+              <EmptyState icon={<IconFile size={20} />} title={t('import.noItems')} description={t('import.noItemsDesc')} />
+            )
           ) : (
             <div className="gam-importlist">
               {visibleItems.map((item) => (

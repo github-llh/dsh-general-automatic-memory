@@ -45,7 +45,7 @@ dsh 插件在物理上必须分成两个独立的模块，分别运行在两个 
 | `recall` | 三级披露渲染、L0/L1/L2 检索、相关度门控、预算裁剪、**逐字节幂等快照** | `ctx.systemPrompt`、`agent/pre-step` | 检索后端不可用 → 降到 L0 纯文件扫描 |
 | `ingest` | 候选抽取、来源分级、相似检索、`ADD/UPDATE/INVALIDATE/NOOP` 决策、审计 | `ctx.llm`（可选）、`session/event` | 无 LLM → 只做规则抽取 + 落 `episode`，不自动晋升 |
 | `curator` | 后台固化：合并、重写画像、热度晋升、冷条目归档、快照、doctor 体检 | `ctx.schedule`（可选）、timer | 定时不可用 → 仅在空闲与阈值触发 |
-| `bridge` | 导入器（8 种来源）、投影器（6 种目标）、跨设备同步、快照/恢复 | — | 单个导入器失败不影响其余（逐源隔离） |
+| `bridge` | 导入器（31 种来源：Claude Code / Codex / Qoder / Gemini CLI / Qwen Code / iFlow / Cursor / Windsurf / Cline / Roo / Copilot / Augment / Kiro / SpecStory / Continue / Junie / Aider / OpenCode / CherryStudio / OneVium / dsh 及其前作 / 通用目录与对话）、投影器（6 种目标）、跨设备同步、快照/恢复 | — | 单个导入器失败不影响其余（逐源隔离） |
 | `api` | `MemoryApi` 接口，Host 侧唯一对外契约 | — | — |
 | `tools` | 6 个模型可见工具 | `ctx.tools` | 工具面可按 config 降级到 3 个（minimal） |
 | `commands` | 5 个 slash 命令 | `ctx.commands` | — |

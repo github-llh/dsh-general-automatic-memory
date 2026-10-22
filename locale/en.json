@@ -232,7 +232,9 @@
     "scanRoot": "Scan root",
     "alreadyImported": "Already imported",
     "alreadyImportedHint": "These entries were imported from the same source before and are skipped",
-    "alreadyImportedNote": "Already-imported entries stay out of the list to avoid redundancy; new content in the same source is still picked up."
+    "alreadyImportedNote": "Already-imported entries stay out of the list to avoid redundancy; new content in the same source is still picked up.",
+    "noMinedItems": "Nothing importable in this source",
+    "noMinedItemsDesc": "The scan succeeded but found no long-term memory to extract (e.g. a small-talk-only conversation)."
   },
   "confirm": {
     "prompt": "Remember this?",

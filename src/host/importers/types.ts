@@ -1,4 +1,5 @@
 import type { Activation, Confidence, Kind } from '../model.js'
+import path from 'node:path'
 
 /**
  * 导入器的统一中间格式。
@@ -14,12 +15,26 @@ export type ImportSourceId =
   | 'cursor-rules'
   | 'windsurf-rules'
   | 'cline-memory-bank'
+  | 'clinerules'
   | 'copilot-instructions'
   | 'gemini-md'
-  | 'dsh-auto-memory'
-  | 'codex-sessions'
+  | 'qwen-md'
+  | 'iflow-md'
+  | 'augment-rules'
+  | 'kiro-steering'
+  | 'specstory-history'
+  | 'continue-rules'
+  | 'junie-guidelines'
   | 'qoder-memory'
+  | 'dsh-auto-memory'
+  | 'opencode-sessions'
+  | 'cherry-memory'
+  | 'onevium'
+  | 'aider-history'
+  | 'codex-sessions'
   | 'qoder-sessions'
+  | 'gemini-sessions'
+  | 'qwen-sessions'
   | 'generic-dir'
   | 'dsh-sessions'
   | 'claude-code-sessions'
@@ -85,6 +100,36 @@ export interface SourceDescriptor {
 // ---------------------------------------------------------------------------
 // 共用小工具
 // ---------------------------------------------------------------------------
+
+/** 统一的条目工厂：稳定 key、标题/摘要裁剪、PII 预扫。所有来源共用。 */
+export function makeImportItem(input: {
+  source: ImportSourceId
+  origin: string
+  index: number
+  title: string
+  summary: string
+  body: string
+  kind: Kind
+  activation: Activation
+  tags?: string[]
+  confidence?: Confidence
+  entities?: string[]
+}): ImportItem {
+  return {
+    key: `${input.source}:${path.basename(input.origin)}:${input.index}`,
+    source: input.source,
+    origin: input.origin,
+    kind: input.kind,
+    title: clip(input.title || '(untitled)', 40),
+    summary: clip(input.summary || input.body, 120),
+    body: input.body.trim(),
+    entities: input.entities ?? [],
+    tags: input.tags ?? [],
+    confidence: input.confidence ?? 'medium',
+    activation: input.activation,
+    pii: hasPii(input.body),
+  }
+}
 
 export function clip(text: string, max: number): string {
   const single = text.replace(/\s+/g, ' ').trim()
