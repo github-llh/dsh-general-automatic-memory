@@ -134,6 +134,11 @@ export const IconPlus = (p: IconProps) => (
     <path d="M12 5v14M5 12h14" />
   </Svg>
 )
+export const IconMinus = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+)
 export const IconCheck = (p: IconProps) => (
   <Svg {...p}>
     <path d="M5 12.5l4.5 4.5L19 7" />
@@ -250,6 +255,25 @@ export const IconGraphView = (p: IconProps) => (
     <circle cx="18" cy="6" r="1.7" />
     <circle cx="12" cy="18" r="1.7" />
     <path d="M7.5 7l3.5 9M16.5 7l-3.5 9M7.7 6h8.6" />
+  </Svg>
+)
+export const IconFit = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5" />
+  </Svg>
+)
+export const IconFilter = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 6h16M7 12h10M10 18h4" />
+    <circle cx="14" cy="6" r="2" />
+    <circle cx="9" cy="12" r="2" />
+    <circle cx="12" cy="18" r="2" />
+  </Svg>
+)
+export const IconMatrix = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <path d="M4 10h16M4 15h16M10 4v16M15 4v16" />
   </Svg>
 )
 export const IconExternal = (p: IconProps) => (

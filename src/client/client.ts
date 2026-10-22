@@ -85,15 +85,14 @@ export function apply(ctx: ClientContext): void {
   )
 }
 
-type Dict = Record<string, string | Record<string, string>>
+type DictValue = string | { [key: string]: DictValue }
 
 function lookup(key: string): string {
-  const dict = (dictionaries.zh ?? dictionaries.en) as Dict
-  const [group, leaf] = key.split('.')
-  if (group && leaf) {
-    const nested = dict[group]
-    if (nested && typeof nested === 'object') return (nested as Record<string, string>)[leaf] ?? key
+  const dict = (dictionaries.zh ?? dictionaries.en) as DictValue
+  let current: DictValue | undefined = dict
+  for (const part of key.split('.')) {
+    if (!current || typeof current !== 'object') return key
+    current = current[part]
   }
-  const flat = dict[key]
-  return typeof flat === 'string' ? flat : key
+  return typeof current === 'string' ? current : key
 }

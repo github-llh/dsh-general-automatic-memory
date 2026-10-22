@@ -5,6 +5,7 @@ import type { Ingestor } from '../ingest/index.js'
 import type { ImportService } from '../importers/index.js'
 import { resolveInRoot } from '../files.js'
 import { utcDayFilesForLocalDate } from '../audit.js'
+import { buildGraph } from '../graph.js'
 import { createSnapshot, diffSnapshots, listSnapshots, restoreSnapshot } from '../snapshot.js'
 import { applyProjection, exportZip, importZip, projectionTargets } from '../bridge.js'
 import { curate } from '../curator.js'
@@ -256,22 +257,14 @@ export function registerFeatures(
   // ---- 族谱 / 配置 ------------------------------------------------------
   route('graph', async (_req, res, query) => {
     const entity = query.get('entity')
-    const edges = deps.api
-      .list()
-      .filter((entry) => entry.meta.kind === 'relations' && entry.meta.temporal.invalidatedAt === null)
-      .filter((entry) => (entity ? entry.meta.entities.includes(entity) || entry.meta.id === entity : true))
-      .map((entry) => ({
-        id: entry.meta.id,
-        from: entry.meta.entities[0] ?? '',
-        to: entry.meta.entities[1] ?? '',
-        rel: entry.meta.title,
-        confidence: entry.meta.confidence,
-        summary: entry.meta.summary,
-      }))
-      .filter((edge) => edge.from && edge.to)
-    const nodes = [...new Set(edges.flatMap((edge) => [edge.from, edge.to]))].sort()
-    const mermaid = ['graph LR', ...edges.map((edge, index) => `  n${index}a["${edge.from}"] -->|${edge.rel}| n${index}b["${edge.to}"]`)].join('\n')
-    send(res, 200, { nodes, edges, mermaid })
+    const rawLimit = Number(query.get('limit'))
+    const payload = buildGraph(deps.api.list(), {
+      ...(Number.isFinite(rawLimit) && rawLimit > 0 ? { limit: rawLimit } : {}),
+    })
+    // entity 参数保留给旧调用方；新面板一次拉全量在本地筛选，交互不打后端。
+    const edges = entity ? payload.edges.filter((edge) => edge.from === entity || edge.to === entity || edge.id === entity || edge.entryId === entity) : payload.edges
+    const nodes = entity ? payload.nodes.filter((node) => node.id === entity || edges.some((edge) => edge.from === node.id || edge.to === node.id)) : payload.nodes
+    send(res, 200, { ...payload, nodes, edges })
   })
 
   route('config', async (_req, res) => {

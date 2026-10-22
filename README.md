@@ -20,7 +20,7 @@ typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只
 | M4 导入 | ✅ 主体 | 10 个记忆源（Claude Code auto memory / CLAUDE.md / AGENTS.md / Cursor / Windsurf / Cline / Copilot / Gemini / 前作 / 任意目录）+ 4 个会话源（dsh 多帧 zstd / Claude Code jsonl / 通用 jsonl / 通用 Markdown）；dry-run 预检 + 快照 + 去重预览 |
 | M4 剩余 | ✅ | 投影器（受管区块、默认关闭）+ zip 导入导出 已补齐 |
 | M5 固化恢复 | ✅ 主体 | 快照（含 sha256 manifest）、diff、回滚（回滚前自动快照）、固化（合并近义/清理低质 summary/晋升重复主题/降级冷条目/episode 过期） |
-| M3 面板 | ✅ 主体 | 8 个视图：总览 / 浏览 / 导入 / 时间线（时点有效）/ 族谱（邻接表+Mermaid）/ 审计 / 恢复 / 设置；族谱暂未做力导向图 |
+| M3 面板 | ✅ 主体 | 8 个视图：总览 / 浏览 / 导入 / 时间线（时点有效）/ 族谱（可缩放图谱 + 项目/类型分组 + 多维筛选 + 列表/洞察）/ 审计 / 恢复 / 设置 |
 
 ## 安装（从 GitHub）
 

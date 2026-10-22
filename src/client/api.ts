@@ -193,7 +193,7 @@ export const api = {
   snapshots: () => get<{ items: SnapshotInfo[] }>('snapshots'),
   createSnapshot: (label = 'manual') => post<SnapshotInfo>('snapshot', { label }),
   audit: (date: string, limit = 200) => get<{ date: string; total: number; items: AuditRow[] }>('audit', { date, limit, tzOffset: tzOffsetForDate(date) }),
-  graph: (entity?: string) => get<{ nodes: string[]; edges: GraphEdge[]; mermaid: string }>('graph', { entity }),
+  graph: (limit?: number) => get<GraphPayload>('graph', { limit }),
   consolidate: () => post<CurateView>('consolidate', {}),
   snapshotDiff: (a: string, b: string) => get<{ added: string[]; removed: string[]; changed: string[] }>('snapshot/diff', { a, b }),
   restore: (label: string, paths?: string[]) => post<{ restored: number; preSnapshot: string }>('snapshot/restore', { label, paths }),
@@ -231,13 +231,70 @@ export interface AuditRow {
   [key: string]: unknown
 }
 
+export type GraphNodeType = 'project' | 'code' | 'person' | 'team' | 'action' | 'system' | 'concept'
+
+export type GraphRelType =
+  | 'owns'
+  | 'belongs'
+  | 'depends'
+  | 'uses'
+  | 'hosts'
+  | 'participates'
+  | 'supersedes'
+  | 'conflicts'
+  | 'related'
+
 export interface GraphEdge {
   id: string
+  entryId: string
   from: string
   to: string
   rel: string
-  confidence: string
+  relType: GraphRelType
+  confidence: 'high' | 'medium' | 'low'
   summary: string
+  project?: string
+  tags: string[]
+  source: string
+  createdAt: string
+  crossProject: boolean
+  entities: string[]
+}
+
+export interface GraphNode {
+  id: string
+  type: GraphNodeType
+  degree: number
+  projects: string[]
+  entries: number
+  firstSeen: string
+  lastSeen: string
+}
+
+export interface GraphFacet {
+  id: string
+  label: string
+  count: number
+}
+
+export interface GraphPayload {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  projects: GraphFacet[]
+  nodeTypes: GraphFacet[]
+  relTypes: GraphFacet[]
+  sources: GraphFacet[]
+  tags: GraphFacet[]
+  total: {
+    nodes: number
+    edges: number
+    relations: number
+    relationsShown: number
+    projects: number
+  }
+  limit: number
+  truncated: boolean
+  mermaid: string
 }
 
 export interface CurateView {

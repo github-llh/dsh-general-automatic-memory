@@ -175,7 +175,7 @@ function guard(req, res) {
 | `/general-memory/entry/invalidate` | POST | `{id, reason, supersededBy?}` | `{ok, archivedTo}` | Editor / Browse |
 | `/general-memory/entry/restore` | POST | `{id}` | `{ok}` | Recovery |
 | `/general-memory/entry/delete` | POST | `{id, hard, confirm}` | `{ok, purged:{index,vectors,audit}}` | Editor（二次确认） |
-| `/general-memory/graph` | GET | `entity?, direction, depth, rel?` | `{nodes, edges, mermaid}` | Graph |
+| `/general-memory/graph` | GET | `limit?`（`entity?` 兼容旧调用） | `{nodes, edges, projects, nodeTypes, relTypes, sources, tags, total, limit, truncated, mermaid}` | Graph |
 | `/general-memory/timeline` | GET | `from, to, kind?, asOf?` | 按天聚合的 episode + 审计 + **时点有效条目集** | Timeline |
 | `/general-memory/audit` | GET | `act?, actor?, from, to, limit` | 流水行 | Audit |
 | `/general-memory/import/scan` | POST | `{source, path?}` | dry-run 预检报告（新增/更新/冲突/跳过/PII/预算影响） | Portability |
@@ -259,15 +259,27 @@ function guard(req, res) {
 
 ### 4.4 族谱 Graph
 
-**自绘 SVG，不引第三方图库**（既因为禁止 import 宿主包，也因为体积与可控性）。
+**自绘 SVG，不引第三方图库**（既因为禁止 import 宿主包，也因为体积与可控性）。0.2.x 起族谱从「邻接表 + 一张固定力导向图」重做成**可缩放、可筛选、可多维分析**的视图，Host 侧负责确定性建模，面板侧负责交互与避让。
 
-- 节点：`entities` 里的实体，按类型着色（人物/组织/服务/系统/术语）；节点大小 ∝ 关联条目数
-- 边：`graph.jsonl` 的受控词表关系（`负责/汇报给/属于/依赖/使用/位于/参与/取代/冲突于`），边上标关系词
-- 布局：力导向（自实现 ~120 行：斥力 + 弹簧 + 阻尼 + 固定迭代数保证确定性），支持拖拽固定
-- 交互：点节点 → 右侧列出所有关联条目；点边 → 跳到产生它的条目；滚轮缩放；双击聚焦子图
-- 过滤：按关系类型、按 scope、按 confidence；隐藏 `invalidatedAt != null` 的边（可开关"显示历史关系"→ 失效边用虚线灰色）
-- 导出：Mermaid 文本（`GENEALOGY.md` 里已有）、PNG（canvas 重绘）、DOT
-- **降级**：实体数 >300 时默认只渲染 top-N 子图并提示，避免手机端卡死
+**Host 侧 `buildGraph()`（`src/host/graph.ts`）**
+
+- 输入：全部有效 `relations` 条目；`invalidatedAt != null` 一律排除
+- 实体维度：`project / code / person / team / action / system / concept` 七类；按项目条目标签、`属于/部署于` 关系、人员标签、代码/系统/操作词表**确定性推断**，并始终保留原始实体名
+- 项目归属：按关系类型加权投票（`属于/部署于` 权重最高，`负责` 次之），避免一条跨项目关系把两端拉进同一项目；节点可归属多个项目，`projects[0]` 为主项目
+- 跨项目：两端实体主项目不同即 `crossProject = true`，用于「只看跨项目」与项目依赖分析
+- 关系边：一条 `entities` 超过 2 个时，以第一个实体为主语派生多条边，`entryId` 仍指向同一条记忆；关系类型收敛为 `owns/belongs/depends/uses/hosts/participates/supersedes/conflicts/related`
+- facet：项目 / 实体类型 / 关系类型 / 置信度 / 来源 / 标签，供面板多维筛选；`relation` 与关系词本身不会进标签筛选
+- 性能护栏：默认只载入最近 `800` 条关系记忆（`limit` 上限 `3000`），`truncated` 与 `total` 让面板明确告知裁剪范围；Mermaid 由 Host 与客户端各自生成，导出时对引号/竖线转义
+
+**面板侧（`src/client/graph.tsx`）**
+
+- 三种视图：**图谱 / 列表 / 洞察**
+  - 图谱：力导向、按项目分组、按实体类型分组；滚轮缩放、拖拽平移、双击定位、键盘 `+/-/0/F/Esc`、双指捏合；跨项目边加粗虚线；标签做**碰撞避让**（选中/命中优先，放下 → 上 → 右 → 左，放不下不画），并随缩放 LOD 增减标签与关系词
+  - 列表：按项目 / 关系 / 置信度 / 不分组；分片加载，搜索只过滤当前列表
+  - 洞察：项目画像、项目 × 实体类型矩阵、跨项目依赖、关键实体；点卡片/单元格可直接回灌图谱筛选
+- 筛选：项目、实体类型、关系类型、置信度、来源、标签、时间范围、只看跨项目；同维度 OR、跨维度 AND，已选条件以可移除 pill 呈现
+- 侧栏：未选中时给项目概览与关键实体；选中后给类型、当前可见关联数、项目 chips、只看关联、定位、复制名称，以及可点开的源关系列表
+- **降级**：多项目默认按项目分组；>240 节点再自动分组并提示；>800 条关系默认裁剪并可「加载更多」，避免面板与移动端卡死
 
 ### 4.5 时间线 Timeline
 
