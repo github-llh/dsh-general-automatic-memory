@@ -1043,8 +1043,9 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 	};
 	function apply(ctx) {
 		ensureStyles();
-		if (ctx.locale) ctx.effect(() => ctx.locale.register(NS, dictionaries), `${NS}:dictionaries`);
-		const translate = ctx.locale ? ctx.locale.bind(NS) : (key) => lookup(key);
+		const locale = ctx.get("locale");
+		if (locale) ctx.effect(() => locale.register(NS, dictionaries), `${NS}:dictionaries`);
+		const translate = locale ? locale.bind(NS) : (key) => lookup(key);
 		ctx.slots.inject("sidebar.panellist", () => ctx.slots.register({
 			name: "sidebar.panellist",
 			id: NS,

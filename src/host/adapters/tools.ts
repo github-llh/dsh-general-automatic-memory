@@ -10,12 +10,14 @@ import type { Activation, Kind, MemoryConfig } from '../model.js'
  * 所有工具返回**纯文本**而不是 JSON：省 token，且模型读文本比读嵌套 JSON 更稳。
  */
 export function registerTools(ctx: HostContext, api: MemoryService, config: MemoryConfig): () => void {
-  if (!ctx.tools) return () => {}
+  // 可选服务必须走 get()：Cordis 对未 inject 的 service 属性访问会直接抛错
+  const tools = ctx.get('tools') as HostContext['tools']
+  if (!tools) return () => {}
   const disposers: Array<() => void> = []
   const surface = config.toolSurface === 'minimal' ? MINIMAL : STANDARD
   for (const toolName of surface) {
     const definition = TOOLS[toolName]?.(api, config)
-    if (definition) disposers.push(ctx.tools.register(definition) as () => void)
+    if (definition) disposers.push(tools.register(definition) as () => void)
   }
   return () => {
     for (const dispose of disposers) dispose()

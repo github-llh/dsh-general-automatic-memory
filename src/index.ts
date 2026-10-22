@@ -37,15 +37,21 @@ export function apply(ctx: HostContext, config: MemoryConfig): void {
         if (disposed) return
         const ingestor = new Ingestor(api, merged, ctx)
         const importer = new ImportService(api, ingestor, merged)
-        disposers.push(
-          registerTools(ctx, api, merged),
-          registerCommands(ctx, api),
-          registerInjection(ctx, api, merged),
-          registerHttp(ctx, api, nonce),
-          registerNonceRoute(ctx, nonce),
-          registerIngest(ctx, ingestor, merged),
-          registerFeatures(ctx, nonce, { api, ingestor, importer }),
-        )
+        // 注册期能力不能在 apply 时假设服务已就绪：用 inject 等待；
+        // 每个 scoped 注册项随子 fiber 自动回收，不重复放进外层 disposers。
+        ctx.inject(['tools'], (scoped) => {
+          registerTools(scoped, api, merged)
+        })
+        ctx.inject(['commands'], (scoped) => {
+          registerCommands(scoped, api)
+        })
+        ctx.inject(['webServer'], (scoped) => {
+          registerHttp(scoped, api, nonce)
+          registerNonceRoute(scoped, nonce)
+          registerFeatures(scoped, nonce, { api, ingestor, importer })
+        })
+        // 目录层只依赖核心事件，不能因为 systemPrompt 缺席而一起失效
+        disposers.push(registerInjection(ctx, api, merged), registerIngest(ctx, ingestor, merged))
         // 暴露给其他插件（例如未来的团队同步插件），也让 cordis_inspect 能看到
         ctx.provide?.('generalMemory', api)
         const stats = await api.stats()

@@ -145,6 +145,8 @@ interface HostContext {
   effect(execute: () => void | Disposable, label?: string): unknown;
   on(name: string, listener: (...args: never[]) => unknown): Disposable;
   get(name: string, strict?: boolean): unknown;
+  /** 等待依赖服务激活后再执行；注册期能力必须走这里，不要在 apply 时假设服务已就绪 */
+  inject(deps: string[], callback: (scoped: HostContext) => unknown): unknown;
   provide?(name: string, value: unknown): Disposable;
   tools?: {
     register(definition: ToolDefinition): Disposable;

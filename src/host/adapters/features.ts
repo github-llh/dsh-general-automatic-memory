@@ -25,7 +25,8 @@ export function registerFeatures(
   nonce: string,
   deps: { api: MemoryService; ingestor: Ingestor; importer: ImportService },
 ): () => void {
-  if (!ctx.webServer?.register) return () => {}
+  const server = ctx.get('webServer') as HostContext['webServer']
+  if (!server?.register) return () => {}
   const disposers: Array<() => void> = []
 
   const route = (
@@ -34,7 +35,7 @@ export function registerFeatures(
     mutating = false,
   ) => {
     disposers.push(
-      ctx.webServer!.register({
+      server.register({
         kind: 'exact',
         path: `${PREFIX}/${name}`,
         handler: async (req, res) => {

@@ -7,7 +7,7 @@
 当前状态：**M0 完成 + M1 主体完成，代码可构建、测试全绿，尚未在真实 dsh 里跑过**。
 
 ```
-typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只 require react)   tests 97/97 ✓
+typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只 require react)   tests 100/100 ✓
 ```
 
 | 里程碑 | 状态 | 说明 |
@@ -40,7 +40,14 @@ npm_config_registry=https://registry.npmjs.org dsh plugin --profile desktop add 
 
 装完重启 dsh（替换已装包需要重启才生效），侧栏会出现「记忆」图标。
 
-**升级**：重复上面的 add（或 `dsh plugin remove` 后再 add）。`~/.dsh/memory` 里的数据不会动。
+**升级**：git 源在 lockfile 里按 commit 锁定，重复 add 不一定重新解析 HEAD。稳妥做法是先移除再装（或用插件页的卸载/重装）：
+
+```bash
+dsh plugin --profile desktop remove dsh-general-automatic-memory
+dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
+```
+
+`~/.dsh/memory` 里的数据不会动。
 
 **可选：上架到插件市场**。仓库里带了索引生成器：
 
@@ -54,7 +61,7 @@ npm run market        # 用当前 HEAD 生成 market/index.json（format:1，git
 
 ```bash
 pnpm install --registry=https://registry.npmjs.org   # ⚠️ 见下方 registry 说明
-npm run check      # typecheck → build → bundle 校验 → 97 个测试
+npm run check      # typecheck → build → bundle 校验 → 100 个测试
 npm run build      # lib/index.js + client/client.js
 ```
 

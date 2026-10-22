@@ -4,10 +4,11 @@ import type { CommandDefinition, CommandResult, HostContext } from '../types.js'
 const SUBCOMMANDS = ['status', 'search', 'read', 'add', 'forget', 'doctor', 'catalog', 'panel'] as const
 
 export function registerCommands(ctx: HostContext, api: MemoryService): () => void {
-  if (!ctx.commands) return () => {}
+  const commands = ctx.get('commands') as HostContext['commands']
+  if (!commands) return () => {}
   const disposers: Array<() => void> = []
   for (const command of [memoryCommand(api), rememberCommand(api), recallCommand(api)]) {
-    disposers.push(ctx.commands.register(command) as () => void)
+    disposers.push(commands.register(command) as () => void)
   }
   return () => {
     for (const dispose of disposers) dispose()

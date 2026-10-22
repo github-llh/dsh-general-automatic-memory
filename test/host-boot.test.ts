@@ -28,6 +28,7 @@ function makeCtx() {
     provided: {},
     logs: [],
   }
+  const services: Record<string, unknown> = {}
   const ctx = {
     logger: {
       info: (...args: unknown[]) => state.logs.push(args.join(' ')),
@@ -45,7 +46,11 @@ function makeCtx() {
       state.listeners.set(event, list)
       return () => {}
     },
-    get: () => undefined,
+    get: (name: string) => services[name],
+    inject: (deps: string[], callback: (scoped: unknown) => unknown) => {
+      if (deps.every((dep) => services[dep] !== undefined)) callback(ctx)
+      return () => {}
+    },
     provide: (serviceName: string, value: unknown) => {
       state.provided[serviceName] = value
       return () => {}
@@ -76,7 +81,45 @@ function makeCtx() {
       },
     },
   }
+  Object.assign(services, {
+    tools: ctx.tools,
+    commands: ctx.commands,
+    systemPrompt: ctx.systemPrompt,
+    webServer: ctx.webServer,
+  })
   return { ctx, state }
+}
+
+/** 只有 Cordis 核心能力、所有 dsh service 都缺席；属性访问会像真机一样抛错 */
+function makeStrictCtx() {
+  const provided: Record<string, unknown> = {}
+  const logs: string[] = []
+  const target: Record<string, unknown> = {
+    logger: {
+      info: (...args: unknown[]) => logs.push(args.join(' ')),
+      warn: (...args: unknown[]) => logs.push(args.join(' ')),
+      error: (...args: unknown[]) => logs.push(args.join(' ')),
+      success: (...args: unknown[]) => logs.push(args.join(' ')),
+    },
+    effect: (fn: () => unknown) => {
+      fn()
+      return () => {}
+    },
+    on: () => () => {},
+    get: () => undefined,
+    inject: () => () => {},
+    provide: (serviceName: string, value: unknown) => {
+      provided[serviceName] = value
+      return () => {}
+    },
+  }
+  const ctx = new Proxy(target, {
+    get(object, prop, receiver) {
+      if (typeof prop === 'symbol' || prop in object) return Reflect.get(object, prop, receiver)
+      throw new Error(`cannot get property "${prop}" without inject`)
+    },
+  })
+  return { ctx, provided, logs }
 }
 
 interface Api {
@@ -120,6 +163,16 @@ describe('插件装配（对构建产物 lib/index.js）', () => {
     expect(state.listeners.get('session/event')?.length ?? 0).toBeGreaterThanOrEqual(2) // inject + ingest 各一个监听器
     // 记忆为空时不该注册常驻层（空 section 也占前缀）
     expect(state.contexts).toHaveLength(0)
+  })
+
+  it('activates even when every optional dsh service is absent', async () => {
+    const { ctx, provided, logs } = makeStrictCtx()
+    apply(ctx as never, { ...DEFAULT_CONFIG, memoryRoot: root } as MemoryConfig)
+    for (let i = 0; i < 200 && provided.generalMemory === undefined; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(provided.generalMemory).toBeDefined()
+    expect(logs.join(' | ')).not.toContain('failed to start')
   })
 
   it('drops to the minimal tool surface when configured', async () => {

@@ -15,12 +15,13 @@ const PREFIX = '/general-memory'
  * 所以这里必须自己再加一层守卫。
  */
 export function registerHttp(ctx: HostContext, api: MemoryService, nonce: string): () => void {
-  if (!ctx.webServer?.register) return () => {}
+  const server = ctx.get('webServer') as HostContext['webServer']
+  if (!server?.register) return () => {}
   const disposers: Array<() => void> = []
 
   const route = (name: string, handler: (req: WebRequest, res: WebResponse, query: URLSearchParams) => Promise<void> | void, mutating = false) => {
     disposers.push(
-      ctx.webServer!.register({
+      server.register({
         kind: 'exact',
         path: `${PREFIX}/${name}`,
         handler: async (req, res) => {
@@ -216,8 +217,9 @@ export function send(res: WebResponse, status: number, payload: unknown): void {
 
 /** 面板加载时取一次；写操作必须带回来 */
 export function registerNonceRoute(ctx: HostContext, nonce: string): () => void {
-  if (!ctx.webServer?.register) return () => {}
-  return ctx.webServer.register({
+  const server = ctx.get('webServer') as HostContext['webServer']
+  if (!server?.register) return () => {}
+  return server.register({
     kind: 'exact',
     path: `${PREFIX}/nonce`,
     handler: (_req, res) => send(res, 200, { nonce }),

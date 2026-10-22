@@ -528,6 +528,8 @@ session/title:1  session/title-llm-request:1  session/end-seed:2  subagent/catal
 12. `zstdDecompressSync` **只解第一帧**，多帧 session 日志必须按 magic offset 切片
 13. 第三方市场（`bradeGithub/DSH-Plugins-Marketplace`）的安装管线是**特征驱动**的：cordis 插件不要在根目录放 install 脚本、版本必须 bump、不要自己注册 patch（否则双加载崩溃）
 14. 官方仓库 `has_issues=false`、`has_pull_requests=false`，CONTRIBUTING 原文 *"We are sorry that we cannot accept external pull requests at the moment."*
+15. Cordis 的 service **不能当普通属性读**：未写进 `inject` 或服务尚未就绪时，`ctx.foo` 会直接抛 `cannot get property "foo" without inject`，`if (ctx.foo)` 也躲不过。规则：运行期可选读取用 `ctx.get('foo')`；注册期能力（tools/commands/webServer/systemPrompt）必须 `ctx.inject(['foo'], (scoped) => …)` 等服务激活后再注册——`apply` 执行时这些服务不保证已就绪
+16. 派生文件会落在条目目录里：`persona/PROFILE.md` 是 GENERATED 文件，扫描记忆条目时必须排除，否则 doctor 会把它报成 `missing YAML frontmatter`
 
 ## 14. 前作 `@a9i5k4/dsh-auto-memory@3.3.15` 数据格式（对标参考）
 

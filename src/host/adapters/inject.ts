@@ -23,9 +23,11 @@ export function registerInjection(ctx: HostContext, api: MemoryService, config: 
   // --- 常驻层 -------------------------------------------------------------
   let alwaysText = ''
   let alwaysDispose: (() => void) | null = null
-
+  // 注册期能力不能在 apply 时假设服务已就绪；等 systemPrompt 激活后再接常驻层。
+  // 目录层（agent/pre-step）只依赖核心事件，不跟着一起等。
+  let systemPrompt: HostContext['systemPrompt']
   const syncAlwaysLayer = (): void => {
-    if (!ctx.systemPrompt?.context) return
+    if (!systemPrompt?.context) return
     const next = renderAlwaysLayer(api.list(), config.budget.alwaysChars)
     if (next === alwaysText) return // 内容没变就不动，保住前缀缓存
     alwaysDispose?.()
@@ -34,15 +36,18 @@ export function registerInjection(ctx: HostContext, api: MemoryService, config: 
       alwaysDispose = null
       return
     }
-    alwaysDispose = ctx.systemPrompt.context({
+    alwaysDispose = systemPrompt.context({
       name: 'general-memory',
-      order: ctx.systemPrompt.getContextOrder?.('runtime-context') ?? 900,
+      order: systemPrompt.getContextOrder?.('runtime-context') ?? 900,
       text: alwaysText,
       required: false,
     }) as () => void
   }
 
-  syncAlwaysLayer()
+  ctx.inject(['systemPrompt'], (scoped) => {
+    systemPrompt = scoped.get('systemPrompt') as HostContext['systemPrompt']
+    syncAlwaysLayer()
+  })
 
   // --- 会话事件：真人到场检测 + compaction 后重排节流 ----------------------
   const humanPending = new Set<string>()
@@ -210,7 +215,7 @@ export function extractTouchedPaths(event: { type?: string; data?: unknown }): s
 }
 
 function measureTotal(ctx: HostContext, decision: unknown): number {
-  const meter = ctx.tokenMeter
+  const meter = ctx.get('tokenMeter') as HostContext['tokenMeter']
   if (!meter?.measure) return 0
   const session = (decision as { session?: unknown })?.session
   if (!session) return 0

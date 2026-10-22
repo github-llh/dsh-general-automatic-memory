@@ -22,7 +22,8 @@ export interface ClientLocale {
 
 export interface ClientContext {
   slots: ClientSlots
-  locale?: ClientLocale
+  /** Cordis：未写进 inject 的 service，属性访问会抛错；可选服务必须走 get() */
+  get(name: string, strict?: boolean): unknown
   effect(execute: () => void | (() => void), label?: string): unknown
 }
 
@@ -35,11 +36,11 @@ const dictionaries = { zh, en }
 export function apply(ctx: ClientContext): void {
   ensureStyles()
 
-  // locale 服务是可选的：拿不到就用内置字典兜底，面板不能因为缺服务而空白
-  if (ctx.locale) ctx.effect(() => ctx.locale!.register(NS, dictionaries), `${NS}:dictionaries`)
-  const translate: Translate = ctx.locale
-    ? ctx.locale.bind(NS)
-    : (key: string) => lookup(key)
+  // locale 服务是可选的：拿不到就用内置字典兜底，面板不能因为缺服务而空白。
+  // 必须用 get()：Cordis 对未 inject 的 service 属性访问会直接抛错。
+  const locale = ctx.get('locale') as ClientLocale | undefined
+  if (locale) ctx.effect(() => locale.register(NS, dictionaries), `${NS}:dictionaries`)
+  const translate: Translate = locale ? locale.bind(NS) : (key: string) => lookup(key)
 
   ctx.slots.inject('sidebar.panellist', () =>
     ctx.slots.register(

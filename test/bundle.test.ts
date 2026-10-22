@@ -109,7 +109,11 @@ describe('client bundle 装载', () => {
           return {}
         },
       },
-      locale: undefined, // locale 服务缺失时也必须能起来
+      get: () => undefined,
+      // 真机 Cordis：未 inject 的 service 属性访问会抛错，必须走 get()
+      get locale(): never {
+        throw new Error('cannot get property "locale" without inject')
+      },
     }
 
     expect(() => plugin.apply(ctx)).not.toThrow()
@@ -123,6 +127,44 @@ describe('client bundle 装载', () => {
     expect(panel?.key).toBe(icon?.id)
     expect(typeof icon?.component).toBe('function')
     expect(typeof panel?.component).toBe('function')
+  })
+
+  it('registers dictionaries through the locale service when it exists', () => {
+    const [entry] = loadBundle()
+    const react = fakeReact()
+    const plugin = entry!.factory((name: string) => (name === 'react' ? react : undefined)) as {
+      apply: (ctx: unknown) => void
+    }
+    let registered: Record<string, unknown> | undefined
+    const ctx = {
+      effect: (fn: () => unknown) => {
+        fn()
+        return () => {}
+      },
+      slots: {
+        inject: (_ownerKey: string, register: () => unknown) => {
+          register()
+          return () => {}
+        },
+        register: (_options: Record<string, unknown>, _component: unknown) => ({}),
+      },
+      get: (name: string) =>
+        name === 'locale'
+          ? {
+              register: (_namespace: string, dictionaries: Record<string, unknown>) => {
+                registered = dictionaries
+                return () => {}
+              },
+              bind: () => (key: string) => key,
+            }
+          : undefined,
+      get locale(): never {
+        throw new Error('must use get()')
+      },
+    }
+
+    expect(() => plugin.apply(ctx)).not.toThrow()
+    expect(registered).toBeDefined()
   })
 
   it('does not touch the DOM at module scope (side effects must wait for materialisation)', () => {
