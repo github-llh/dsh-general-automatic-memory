@@ -2,6 +2,8 @@ import { readFile, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
+import { hasExtension } from '../files.js'
+import { expandUserPath } from '../paths.js'
 import { extractFromTurn, type Candidate } from '../ingest/extract.js'
 import type { ImportItem, ScanOptions, SkippedFile, SourceDescriptor } from './types.js'
 import { clip, hasPii } from './types.js'
@@ -262,12 +264,12 @@ const dshSessions: SourceDescriptor = {
   kind: 'conversation',
   async detect() {
     const root = path.join(homedir(), '.dsh', 'sessions')
-    const files = await collectSessionFiles(root, (name) => name.startsWith('session') && (name.endsWith('.zstd') || name.endsWith('.jsonl')))
+    const files = await collectSessionFiles(root, (name) => name.toLowerCase().startsWith('session') && (hasExtension(name, '.zstd') || hasExtension(name, '.jsonl')))
     return files.length > 0 ? [root] : []
   },
   async scan(_cwd, options) {
     const root = path.join(homedir(), '.dsh', 'sessions')
-    const files = await collectSessionFiles(root, (name) => name.startsWith('session') && (name.endsWith('.zstd') || name.endsWith('.jsonl')))
+    const files = await collectSessionFiles(root, (name) => name.toLowerCase().startsWith('session') && (hasExtension(name, '.zstd') || hasExtension(name, '.jsonl')))
     const items: ImportItem[] = []
     const skipped: SkippedFile[] = []
     for (const abs of files) {
@@ -291,12 +293,12 @@ const claudeSessions: SourceDescriptor = {
   kind: 'conversation',
   async detect() {
     const root = path.join(homedir(), '.claude', 'projects')
-    const files = await collectSessionFiles(root, (name) => name.endsWith('.jsonl'))
+    const files = await collectSessionFiles(root, (name) => hasExtension(name, '.jsonl'))
     return files.length > 0 ? [root] : []
   },
   async scan(_cwd, options) {
     const root = path.join(homedir(), '.claude', 'projects')
-    const files = await collectSessionFiles(root, (name) => name.endsWith('.jsonl'))
+    const files = await collectSessionFiles(root, (name) => hasExtension(name, '.jsonl'))
     const items: ImportItem[] = []
     const skipped: SkippedFile[] = []
     for (const abs of files) {
@@ -324,10 +326,10 @@ const genericConversation = (id: 'generic-jsonl' | 'generic-markdown', label: st
   },
   async scan(_cwd, options) {
     if (!options.path) return { items: [], skipped: [{ origin: '(none)', reason: '需要指定 path' }] }
-    const abs = path.resolve(options.path.replace(/^~(?=\/|$)/, homedir()))
+    const abs = path.resolve(expandUserPath(options.path))
     const text = await readMaybeZstd(abs)
     if (!text) return { items: [], skipped: [{ origin: abs, reason: 'unreadable' }] }
-    const isJsonl = abs.endsWith('.jsonl') || abs.endsWith('.json')
+    const isJsonl = hasExtension(abs, '.jsonl') || hasExtension(abs, '.json')
     const turns = id === 'generic-jsonl' || isJsonl ? parseGenericJsonl(text, abs) : parseMarkdownConversation(text, abs)
     const items = mineTurns(turns, options).map((entry, index) => ({ ...entry, source: id, key: `${id}:${path.basename(abs)}:${index}` }))
     return { items, skipped: [] }

@@ -23,21 +23,33 @@ async function ensureNonce(): Promise<string | null> {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  // 面板可能挂在一个不响应的 Host 上；没有超时会永远停在 loading。
+  const timeout = typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal ? AbortSignal.timeout(15_000) : undefined
   const response = await fetch(path, {
     credentials: 'same-origin',
+    cache: 'no-store',
     ...init,
+    signal: init?.signal ?? timeout,
     headers: { accept: 'application/json', ...(init?.headers ?? {}) },
   })
   if (!response.ok) {
     let detail = ''
     try {
-      detail = JSON.stringify(await response.json())
+      const body = (await response.json()) as { error?: string } | null
+      detail = body?.error ?? JSON.stringify(body)
     } catch {
       detail = response.statusText
     }
-    throw new Error(`${response.status} ${path} ${detail}`)
+    throw new Error(detail ? `${detail} (${response.status})` : `${response.status} ${path}`)
   }
   return (await response.json()) as T
+}
+
+/** 面板按本地日期筛选审计；把该日期的本地时区偏移传给 Host，用来换算 UTC 文件名。 */
+export function tzOffsetForDate(date: string): number {
+  const parsed = new Date(`${date}T12:00:00`)
+  if (Number.isNaN(parsed.getTime())) return 0
+  return -parsed.getTimezoneOffset()
 }
 
 export async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
@@ -143,27 +155,51 @@ export interface ApplyReportView {
   details: Array<{ key: string; title: string; outcome: string; reason?: string }>
 }
 
+export interface DoctorReport {
+  before: Array<{ level: string; code: string; message: string }>
+  after: Array<{ level: string; code: string; message: string }>
+  issues: Array<{ rel: string; issue: string; message: string }>
+  rebuilt: string[]
+  unchanged: number
+  fixed: boolean
+}
+
+export interface CatalogView {
+  text: string
+  shown: number
+  omitted: number
+}
+
+export interface ExportView {
+  path: string
+  bytes: number
+  files: number
+  excluded: number
+}
+
 export const api = {
   stats: () => get<Stats>('stats'),
   entries: (params: { q?: string; kind?: string; scope?: string; limit?: number; offset?: number }) =>
     get<{ total: number; items: EntrySummary[] }>('entries', params),
   entry: (id: string) => get<EntryDetail>('entry', { id }),
-  catalog: (project?: string) => get<{ text: string; shown: number; omitted: number }>('catalog', { project }),
+  catalog: (project?: string) => get<CatalogView>('catalog', { project }),
   patch: (id: string, body: string, expectedRev?: number) => post<{ ok: true; rev: number; checksum: string }>('entry/patch', { id, body, expectedRev }),
   invalidate: (id: string, reason: string) => post<{ ok: true; id: string }>('entry/invalidate', { id, reason }),
-  doctor: (fix: boolean) => post<{ issues: unknown[]; rebuilt: string[]; unchanged: number; fixed: boolean }>(`doctor${fix ? '?fix=1' : ''}`, {}),
+  doctor: (fix: boolean) => post<DoctorReport>(`doctor${fix ? '?fix=1' : ''}`, {}),
   importSources: () => get<{ cwd: string; sources: ImportSourceStatus[] }>('import/sources'),
   importScan: (body: { source: string; path?: string; limit?: number; maxTurns?: number }) => post<ScanReportView>('import/scan', body),
   importApply: (body: { scanId: string; keys: string[]; project?: string }) => post<ApplyReportView>('import/apply', body),
+  importZip: (path: string) => post<{ restored: number; skipped: number; preSnapshot?: string }>('import/zip', { path }),
   snapshots: () => get<{ items: SnapshotInfo[] }>('snapshots'),
-  audit: (date: string, limit = 200) => get<{ date: string; total: number; items: AuditRow[] }>('audit', { date, limit }),
+  createSnapshot: (label = 'manual') => post<SnapshotInfo>('snapshot', { label }),
+  audit: (date: string, limit = 200) => get<{ date: string; total: number; items: AuditRow[] }>('audit', { date, limit, tzOffset: tzOffsetForDate(date) }),
   graph: (entity?: string) => get<{ nodes: string[]; edges: GraphEdge[]; mermaid: string }>('graph', { entity }),
   consolidate: () => post<CurateView>('consolidate', {}),
   snapshotDiff: (a: string, b: string) => get<{ added: string[]; removed: string[]; changed: string[] }>('snapshot/diff', { a, b }),
-  restore: (label: string) => post<{ restored: number; preSnapshot: string }>('snapshot/restore', { label }),
+  restore: (label: string, paths?: string[]) => post<{ restored: number; preSnapshot: string }>('snapshot/restore', { label, paths }),
   projections: () => get<{ cwd: string; targets: ProjectionView[] }>('projections'),
   applyProjections: (ids: string[]) => post<{ results: Array<{ target: string; path: string; changed: boolean }> }>('projections/apply', { ids }),
-  exportZip: () => post<{ path: string; bytes: number; files: number; excluded: number }>('export', {}),
+  exportZip: (includePii = false) => post<ExportView>('export', { includePii }),
   config: () => get<Record<string, unknown>>('config'),
   pending: () => get<{ items: PendingView[]; size: number }>('pending-writes'),
   decidePending: (id: string, action: 'accept' | 'reject') => post<{ ok: boolean }>('pending-writes/decide', { id, action }),

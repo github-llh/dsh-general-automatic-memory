@@ -27,6 +27,7 @@ afterEach(async () => {
 })
 
 const NOW = new Date('2026-10-21T10:00:00Z')
+const SUGGEST_CONFIG = { ...DEFAULT_CONFIG, ingest: { ...DEFAULT_CONFIG.ingest, writeMode: 'suggest' as const } }
 
 function candidate(over: Partial<Candidate> = {}): Candidate {
   return {
@@ -318,10 +319,32 @@ describe('导入服务（记忆文件）', () => {
   })
 })
 
-describe('自动写入（suggest 模式）', () => {
-  it('queues a feedback candidate instead of writing it, then writes on approval', async () => {
+describe('自动写入（默认 auto 模式）', () => {
+  it('writes persona/feedback immediately and can be undone afterwards', async () => {
     const api = await MemoryService.create(DEFAULT_CONFIG, root)
     const ingestor = new Ingestor(api, DEFAULT_CONFIG)
+    const result = await ingestor.ingestTurn({
+      sid: 's-auto',
+      turn: 1,
+      cwd: '/repo/demo',
+      userMessages: ['以后不要在回复末尾加总结了'],
+      assistantMessages: [],
+      now: NOW,
+    })
+    expect(result.pending).toBe(0)
+    expect(api.list().some((entry) => entry.meta.kind === 'feedback')).toBe(true)
+
+    const entry = api.list().find((item) => item.meta.kind === 'feedback')
+    expect(entry).toBeTruthy()
+    await api.invalidate(entry!.meta.id, { reason: 'undo from test' })
+    expect(api.list().some((item) => item.meta.id === entry!.meta.id)).toBe(false)
+  })
+})
+
+describe('自动写入（suggest 模式）', () => {
+  it('queues a feedback candidate instead of writing it, then writes on approval', async () => {
+    const api = await MemoryService.create(SUGGEST_CONFIG, root)
+    const ingestor = new Ingestor(api, SUGGEST_CONFIG)
     const result = await ingestor.ingestTurn({
       sid: 's1',
       turn: 1,
@@ -344,8 +367,8 @@ describe('自动写入（suggest 模式）', () => {
   })
 
   it('auto-writes project candidates without asking (they are in autoKinds)', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
-    const ingestor = new Ingestor(api, DEFAULT_CONFIG)
+    const api = await MemoryService.create(SUGGEST_CONFIG, root)
+    const ingestor = new Ingestor(api, SUGGEST_CONFIG)
     const result = await ingestor.ingestTurn({
       sid: 's2',
       turn: 1,
@@ -360,8 +383,8 @@ describe('自动写入（suggest 模式）', () => {
   })
 
   it('expires unactioned proposals into a silent NOOP', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
-    const ingestor = new Ingestor(api, DEFAULT_CONFIG)
+    const api = await MemoryService.create(SUGGEST_CONFIG, root)
+    const ingestor = new Ingestor(api, SUGGEST_CONFIG)
     await ingestor.ingestTurn({
       sid: 's3',
       turn: 1,

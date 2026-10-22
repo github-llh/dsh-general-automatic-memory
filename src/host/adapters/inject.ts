@@ -3,6 +3,7 @@ import type { HostContext } from '../types.js'
 import type { Entry, MemoryConfig } from '../model.js'
 import { renderAlwaysLayer } from '../recall.js'
 import { projectSlug } from '../paths.js'
+import path from 'node:path'
 
 /**
  * 注入管线。两条通道，刻意分开：
@@ -203,11 +204,21 @@ function globMatchesFor(api: MemoryService, decision: unknown, touched: string[]
   return out
 }
 
+/** Windows 上工具路径是反斜杠：glob 匹配前统一成 POSIX 分隔符。 */
+function globPath(p: string): string {
+  return process.platform === 'win32' ? p.split(path.sep).join('/') : p
+}
+
 /** 极简 glob：支持 `**`、`*`、`?`。路径先相对 cwd 归一化再匹配。 */
 export function matchGlob(pattern: string, target: string, cwd?: string): boolean {
-  const relative = cwd && target.startsWith(cwd) ? target.slice(cwd.length).replace(/^\//, '') : target.replace(/^\//, '')
+  const normalizedPattern = globPath(pattern)
+  const normalizedTarget = globPath(target)
+  const normalizedCwd = cwd ? globPath(cwd) : undefined
+  const relative = normalizedCwd && normalizedTarget.startsWith(normalizedCwd)
+    ? normalizedTarget.slice(normalizedCwd.length).replace(/^\//, '')
+    : normalizedTarget.replace(/^\//, '')
   const rx = new RegExp(
-    `^${pattern
+    `^${normalizedPattern
       .split('/')
       .map((segment) => {
         if (segment === '**') return '.*'
@@ -215,7 +226,7 @@ export function matchGlob(pattern: string, target: string, cwd?: string): boolea
       })
       .join('/')}$`,
   )
-  return rx.test(relative) || rx.test(target)
+  return rx.test(relative) || rx.test(normalizedTarget)
 }
 
 /**

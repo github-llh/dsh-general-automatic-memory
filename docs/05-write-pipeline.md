@@ -114,15 +114,15 @@ user-stated / manual  >  feedback（用户纠正过）  >  model-inferred  >  to
 
 ## 5. `writeMode`：三种产品姿态
 
-| 模式 | 行为 | 默认适用 |
+| 模式 | 行为 | 适用 |
 |---|---|---|
-| `auto` | 直接落盘，事后可在面板看到/撤销 | `episode`、`project`（低风险层） |
-| `suggest` | **落盘前推确认卡**到 `conversation.input.dock`，用户批准才写 | `persona`、`feedback`、`preference`、`relations`（涉及用户身份与纪律） |
+| `auto`（默认） | 直接落盘，事后在「总览 → 最近写入」一键撤销 | 默认；记忆产品的心智就是"先记住，再管理" |
+| `suggest` | **落盘前推确认卡**到 `conversation.input.dock`，用户批准才写 | 涉及用户身份与纪律、希望先审批的场景 |
 | `manual` | 只有 `/remember`、`memory_write`、面板编辑能写 | 高安全要求场景 |
 
-`suggest` 抄的是 Cursor Memories 的做法（后台 sidecar 模型提议 → **用户批准**后生效）。这是产品上最划算的一个功能：它把"记忆是否可信"的判断权交回用户，同时每次批准都是一次高质量的正向标注（喂给 `explicitBoost`）。
+默认选 `auto`：把"是否记住"从每次打断用户的确认，改成可撤销的自动写入。面板在总览直接暴露最近写入与撤销按钮，信任来自可回滚而不是弹窗。需要审批的人把 `ingest.writeMode` 改成 `suggest` 即可。
 
-确认卡设计（见 [07 §5.4](07-plugin-ui.md)）：一行摘要 + kind 标签 + "记住 / 改一下 / 不要"三键 + 可展开看完整正文。**默认 15 秒无操作自动收起为静默 NOOP**，绝不打断用户当前任务，也绝不因为用户没点就偷偷写。
+`suggest` 抄的是 Cursor Memories 的做法（后台 sidecar 模型提议 → **用户批准**后生效）。确认卡设计（见 [07 §5.4](07-plugin-ui.md)）：**单行折叠、宽度跟随输入区**，kind/来源标签 + 记住/忽略两键；完整摘要见卡片第二行，理由放在悬停提示里。**默认 15 秒无操作自动收起为静默 NOOP**，绝不打断当前任务，也绝不因为用户没点就偷偷写。
 
 ## 6. 原子写与并发
 

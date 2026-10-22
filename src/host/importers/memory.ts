@@ -1,6 +1,8 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
+import { hasExtension } from '../files.js'
+import { expandUserPath } from '../paths.js'
 import type { Activation, Kind } from '../model.js'
 import {
   classify,
@@ -50,9 +52,15 @@ async function listFiles(dir: string, exts: string[], recursive = false, depth =
       if (recursive) out.push(...(await listFiles(abs, exts, true, depth + 1)))
       continue
     }
-    if (exts.some((ext) => entry.name.endsWith(ext))) out.push(abs)
+    if (exts.some((ext) => hasExtension(entry.name, ext))) out.push(abs)
   }
   return out
+}
+
+/** 去掉 Markdown 扩展名（大小写不敏感）用于标题兜底。 */
+function baseNoExt(abs: string): string {
+  const name = path.basename(abs)
+  return name.toLowerCase().endsWith('.md') ? name.slice(0, -3) : name
 }
 
 async function readText(abs: string): Promise<string | null> {
@@ -139,7 +147,7 @@ const claudeCodeMemory: SourceDescriptor = {
     const skipped: SkippedFile[] = []
     for (const dir of await listUserProjectDirs('memory')) {
       for (const abs of await listFiles(dir, ['.md'])) {
-        if (path.basename(abs) === 'MEMORY.md') continue // 索引文件不是记忆本体
+        if (path.basename(abs).toLowerCase() === 'memory.md') continue // 索引文件不是记忆本体
         if (items.length >= options.limit) break
         const text = await readText(abs)
         if (!text) continue
@@ -154,7 +162,7 @@ const claudeCodeMemory: SourceDescriptor = {
             source: 'claude-code-memory',
             origin: abs,
             index: 0,
-            title: String(data.name ?? path.basename(abs, '.md')),
+            title: String(data.name ?? baseNoExt(abs)),
             summary: String(data.description ?? body),
             body,
             kind,
@@ -471,7 +479,7 @@ const genericDir: SourceDescriptor = {
   },
   async scan(_cwd, options) {
     if (!options.path) return { items: [], skipped: [{ origin: '(none)', reason: '需要指定 path' }] }
-    const root = path.resolve(options.path.replace(/^~(?=\/|$)/, HOME()))
+    const root = path.resolve(expandUserPath(options.path))
     const items: ImportItem[] = []
     const skipped: SkippedFile[] = []
     for (const abs of await listFiles(root, ['.md', '.markdown', '.txt'], true)) {

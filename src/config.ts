@@ -38,7 +38,8 @@ export const DEFAULT_CONFIG: MemoryConfig = {
     showTurnTail: false,
   },
   ingest: {
-    writeMode: 'suggest',
+    // 「自动记忆」是产品默认姿态：先落盘、随时可撤销。suggest 留给需要先审批的用户。
+    writeMode: 'auto',
     autoKinds: ['episode', 'project'],
     suggestTimeoutSec: 15,
     llmExtract: true,
@@ -107,7 +108,7 @@ export const Config: Schema<MemoryConfig> = Schema.object({
   }).default({ ...DEFAULT_CONFIG.inject }),
 
   ingest: Schema.object({
-    writeMode: Schema.union(WRITE_MODES).default('suggest').description('suggest = ask before writing persona/feedback/preference'),
+    writeMode: Schema.union(WRITE_MODES).default('auto').description('auto = write immediately and undo anytime; suggest = ask before writing persona/feedback/preference'),
     autoKinds: kindList,
     suggestTimeoutSec: Schema.number().default(15),
     llmExtract: Schema.boolean().default(true),

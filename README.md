@@ -15,7 +15,7 @@ typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只
 | M0 骨架可加载 | ✅ | 清单、patch、client bundle 构建链（自己复刻 lazy-CJS）、locale、icon、bundle 格式校验 |
 | M1 格式 + 只读召回 | ✅ 主体 | 8 类目录、frontmatter 规范、原子写、`INDEX.md`/`PROFILE.md`/`graph.jsonl` 生成、L0 词法检索、三级注入、逐字节幂等、6 工具 + 3 命令、面板「总览/浏览」两个视图 |
 | M1 剩余 | ✅ | 真实 dsh 冒烟完成：常驻/目录注入、`memory_recall` 走 L1 FTS5、glob 激活（`tool/call.arguments` 是 JSON 字符串；slim 也保留 glob） |
-| M2 自动写入 | ✅ 主体 | 规则抽取（8 类信号 + 相对日期转绝对）、来源门控（密钥/PII/敏感话题/突增熔断）、`ADD/UPDATE/INVALIDATE/NOOP`、episode 层、`suggest` 待确认队列（15s 超时=静默 NOOP）、compaction 抢救、审计 |
+| M2 自动写入 | ✅ 主体 | 规则抽取（8 类信号 + 相对日期转绝对）、来源门控（密钥/PII/敏感话题/突增熔断）、`ADD/UPDATE/INVALIDATE/NOOP`、episode 层、默认 `auto` 落盘 + 总览一键撤销、可选 `suggest` 待确认队列（15s 静默 NOOP）、compaction 抢救、审计 |
 | M2 剩余 | ✅ | LLM 兜底已按真实契约核对：`provider/model` 取本会话 `model/selection`，组装 `text-delta`；真机 `llmCalls=1`，候选进入 pending（15s 静默 NOOP） |
 | M4 导入 | ✅ 主体 | 10 个记忆源（Claude Code auto memory / CLAUDE.md / AGENTS.md / Cursor / Windsurf / Cline / Copilot / Gemini / 前作 / 任意目录）+ 4 个会话源（dsh 多帧 zstd / Claude Code jsonl / 通用 jsonl / 通用 Markdown）；dry-run 预检 + 快照 + 去重预览 |
 | M4 剩余 | ✅ | 投影器（受管区块、默认关闭）+ zip 导入导出 已补齐 |

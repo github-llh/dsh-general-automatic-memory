@@ -1,6 +1,6 @@
 {
   "name": "dsh-general-automatic-memory",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "dsh-exclusive memory hub: import every agent's memories and conversations, self-index, fixed token budget · 专属 dsh 的记忆中枢：收编各 agent 的记忆与会话",
   "type": "module",
   "icon": "icon.svg",

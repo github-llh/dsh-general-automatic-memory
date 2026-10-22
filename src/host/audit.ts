@@ -38,3 +38,16 @@ export async function audit(root: string, record: AuditRecord, now: string = iso
   const line = JSON.stringify({ ts: now, ...record })
   await appendLine(resolveInRoot(root, file), line)
 }
+
+/**
+ * 面板按用户本地日期查审计，审计文件按 UTC 日期命名。
+ * 这里把「本地日 + 时区偏移」换算成 UTC 区间，并指出要读哪几个 UTC 日文件。
+ * `tzOffset` 是“东几区”的分钟数（东八区 = 480）。
+ */
+export function utcDayFilesForLocalDate(date: string, tzOffset: number): { start: number; end: number; files: string[] } {
+  const [year, month, day] = date.split('-').map((part) => Number(part)) as [number, number, number]
+  const start = Date.UTC(year, month - 1, day) - tzOffset * 60_000
+  const end = start + 86_400_000
+  const files = [...new Set([new Date(start).toISOString().slice(0, 10), new Date(end - 1).toISOString().slice(0, 10)])]
+  return { start, end, files }
+}

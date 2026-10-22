@@ -21,12 +21,22 @@ export function resolveInRoot(root: string, rel: string): string {
   // 绝对路径也接受，但必须落在 root 内（面板传来的可能是完整路径）
   const abs = path.isAbsolute(rel) ? path.resolve(rel) : path.resolve(rootAbs, toPosix(rel).replace(/^\/+/, ''))
   const rootWithSep = rootAbs.endsWith(path.sep) ? rootAbs : rootAbs + path.sep
-  if (abs !== rootAbs && !abs.startsWith(rootWithSep)) throw new PathEscapeError(rel)
+  // Windows/macOS 默认大小写不敏感：`C:\Root` 与 `c:\root\...` 是同一路径。
+  const same = process.platform === 'win32' || process.platform === 'darwin'
+  const inside = same
+    ? abs.toLowerCase() === rootAbs.toLowerCase() || abs.toLowerCase().startsWith(rootWithSep.toLowerCase())
+    : abs === rootAbs || abs.startsWith(rootWithSep)
+  if (!inside) throw new PathEscapeError(rel)
   return abs
 }
 
 export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true, mode: 0o700 })
+}
+
+/** 大小写不敏感的扩展名判断：Windows/macOS 上 `.MD` 与 `.md` 是同一类文件。 */
+export function hasExtension(name: string, ext: string): boolean {
+  return name.toLowerCase().endsWith(ext.toLowerCase())
 }
 
 /**
@@ -104,7 +114,7 @@ async function walk(abs: string, root: string, out: string[]): Promise<void> {
     const child = path.join(abs, entry.name)
     if (entry.isDirectory()) {
       await walk(child, root, out)
-    } else if (entry.isFile() && entry.name.endsWith('.md') && !entry.name.endsWith('.tmp')) {
+    } else if (entry.isFile() && hasExtension(entry.name, '.md') && !hasExtension(entry.name, '.tmp')) {
       out.push(toPosix(path.relative(root, child)))
     }
   }

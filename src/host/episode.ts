@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { appendLine, readTextFile, resolveInRoot, writeFileAtomic } from './files.js'
+import { appendLine, hasExtension, readTextFile, resolveInRoot, writeFileAtomic } from './files.js'
 import { isoNow, ulid } from './model.js'
 import { DIRS } from './paths.js'
 
@@ -129,7 +129,7 @@ export class EpisodeStore {
     let names: string[] = []
     try {
       const { readdir } = await import('node:fs/promises')
-      names = (await readdir(abs)).filter((n) => n.endsWith('.jsonl')).sort()
+      names = (await readdir(abs)).filter((n) => hasExtension(n, '.jsonl')).sort()
     } catch {
       return 0
     }

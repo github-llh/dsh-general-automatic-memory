@@ -4,6 +4,7 @@ import type { MemoryService } from '../api.js'
 import type { Ingestor } from '../ingest/index.js'
 import type { ImportService } from '../importers/index.js'
 import { resolveInRoot } from '../files.js'
+import { utcDayFilesForLocalDate } from '../audit.js'
 import { createSnapshot, diffSnapshots, listSnapshots, restoreSnapshot } from '../snapshot.js'
 import { applyProjection, exportZip, importZip, projectionTargets } from '../bridge.js'
 import { curate } from '../curator.js'
@@ -133,23 +134,34 @@ export function registerFeatures(
   route('audit', async (_req, res, query) => {
     const date = query.get('date') ?? new Date().toISOString().slice(0, 10)
     const limit = Math.min(Number(query.get('limit') ?? '200') || 200, 1000)
+    // 面板按用户本地日期查询；审计文件按 UTC 日期命名，所以要把本地日换算成 UTC 区间。
+    const tzOffset = Number(query.get('tzOffset') ?? '0') || 0
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return send(res, 400, { error: 'date must be yyyy-mm-dd' })
-    const abs = resolveInRoot(deps.api.root, path.posix.join(DIRS.audit, `${date}.jsonl`))
-    let text = ''
-    try {
-      text = await readFile(abs, 'utf8')
-    } catch {
-      return send(res, 200, { date, items: [] })
-    }
-    const lines = text.split('\n').filter(Boolean)
-    const items = lines.slice(-limit).map((line) => {
+    if (!Number.isFinite(tzOffset) || Math.abs(tzOffset) > 24 * 60) return send(res, 400, { error: 'bad tzOffset' })
+    const { start, end, files } = utcDayFilesForLocalDate(date, tzOffset)
+    const rows: Array<Record<string, unknown>> = []
+    let total = 0
+    for (const file of files) {
+      let text = ''
       try {
-        return JSON.parse(line) as unknown
+        text = await readFile(resolveInRoot(deps.api.root, path.posix.join(DIRS.audit, `${file}.jsonl`)), 'utf8')
       } catch {
-        return { raw: line }
+        continue
       }
-    })
-    send(res, 200, { date, total: lines.length, items })
+      for (const line of text.split('\n').filter(Boolean)) {
+        try {
+          const row = JSON.parse(line) as Record<string, unknown>
+          const ts = Date.parse(String(row.ts ?? ''))
+          if (Number.isFinite(ts) && (ts < start || ts >= end)) continue
+          rows.push(row)
+        } catch {
+          rows.push({ raw: line })
+        }
+      }
+    }
+    rows.sort((a, b) => String(a.ts ?? '').localeCompare(String(b.ts ?? '')))
+    total = rows.length
+    send(res, 200, { date, total, items: rows.slice(-limit) })
   })
 
 

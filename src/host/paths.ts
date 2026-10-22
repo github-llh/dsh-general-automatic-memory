@@ -14,19 +14,20 @@ import path from 'node:path'
  */
 export function resolveDshHome(): string {
   const fromEnv = process.env.DSH_HOME
-  if (fromEnv && fromEnv.trim().length > 0) return expandHome(fromEnv.trim())
+  if (fromEnv && fromEnv.trim().length > 0) return expandUserPath(fromEnv.trim())
   return path.join(homedir(), '.dsh')
 }
 
 export function resolveMemoryRoot(configured: string | undefined): string {
   const explicit = configured?.trim() || process.env.DSH_MEMORY_ROOT?.trim()
-  if (explicit) return path.resolve(expandHome(explicit))
+  if (explicit) return path.resolve(expandUserPath(explicit))
   return path.join(resolveDshHome(), 'memory')
 }
 
-function expandHome(p: string): string {
-  if (p === '~') return homedir()
-  if (p.startsWith('~/')) return path.join(homedir(), p.slice(2))
+/** 展开 `~` / `~/` / `~\`。Windows 用户习惯输反斜杠，不能当成普通字符。 */
+export function expandUserPath(p: string): string {
+  if (p === '~' || p === '~/' || p === '~\\') return homedir()
+  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(homedir(), p.slice(2))
   return p
 }
 
@@ -72,7 +73,9 @@ export const SCHEMA_VERSION = 1
  */
 export function projectSlug(absolutePath: string): string {
   const normalized = path.resolve(absolutePath)
-  const hash = createHash('sha256').update(normalized).digest('base64url').slice(0, 12)
+  // Windows 默认大小写不敏感：同一目录的不同大小写必须得到同一 slug。
+  const hashInput = process.platform === 'win32' ? normalized.toLowerCase() : normalized
+  const hash = createHash('sha256').update(hashInput).digest('base64url').slice(0, 12)
   const tail = path
     .basename(normalized)
     .replace(/[^a-zA-Z0-9._-]/g, '-')

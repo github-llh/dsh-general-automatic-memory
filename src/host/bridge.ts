@@ -2,7 +2,8 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
-import { resolveInRoot } from './files.js'
+import { hasExtension, resolveInRoot } from './files.js'
+import { expandUserPath } from './paths.js'
 import { isoNow, type Entry } from './model.js'
 import { DIRS } from './paths.js'
 
@@ -157,7 +158,7 @@ export async function exportZip(root: string, opts: { includePii?: boolean } = {
         await walk(abs, rel)
         continue
       }
-      if (!entry.name.endsWith('.md') && !entry.name.endsWith('.jsonl') && !entry.name.endsWith('.yaml')) continue
+      if (!hasExtension(entry.name, '.md') && !hasExtension(entry.name, '.jsonl') && !hasExtension(entry.name, '.yaml')) continue
       const content = await readFile(abs, 'utf8')
       // 导出是本机备份，不是团队同步 —— 只排除 PII；`shareable:none` 是团队同步的开关
       if (!opts.includePii && /pii:\s*true/.test(content)) {
@@ -196,7 +197,7 @@ export interface ZipImportResult {
 
 /** 导入 zip：**不覆盖**已存在的文件（冲突留给导入器按条目决策，避免静默盖掉较新的记忆） */
 export async function importZip(root: string, zipPath: string): Promise<ZipImportResult> {
-  const buffer = await readFile(path.resolve(zipPath.replace(/^~(?=\/|$)/, homedir())))
+  const buffer = await readFile(path.resolve(expandUserPath(zipPath)))
   const unzipped = unzipSync(new Uint8Array(buffer))
   let restored = 0
   let skipped = 0

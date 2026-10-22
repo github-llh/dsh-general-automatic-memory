@@ -45,7 +45,7 @@ function loadBundle(): Registered[] {
   return registered
 }
 
-/** 最小 React 替身：只需要 createElement 返回一个可辨识的对象 */
+/** 最小 React 替身：组件不会在冒烟测试里渲染，只需要模块加载期能拿到 API */
 function fakeReact() {
   const createElement = (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props, children })
   const Component = class {
@@ -60,8 +60,17 @@ function fakeReact() {
     useState: (initial: unknown) => [initial, () => {}],
     useEffect: () => {},
     useCallback: (fn: unknown) => fn,
+    useMemo: (fn: () => unknown) => fn(),
+    useRef: (value: unknown) => ({ current: value }),
+    useId: () => 'gam-test-id',
+    Fragment: Symbol.for('react.fragment'),
     default: { createElement, Component },
   }
+}
+
+function fakeJsxRuntime() {
+  const jsx = (type: unknown, props: unknown, key?: unknown) => ({ type, props, key })
+  return { jsx, jsxs: jsx, Fragment: Symbol.for('react.fragment') }
 }
 
 describe('client bundle 装载', () => {
@@ -76,6 +85,7 @@ describe('client bundle 装载', () => {
     const react = fakeReact()
     const plugin = entry!.factory((name: string) => {
       if (name === 'react') return react
+      if (name === 'react/jsx-runtime' || name === 'react/jsx-dev-runtime') return fakeJsxRuntime()
       throw new Error(`unexpected require("${name}") — not in the browser baseline`)
     }) as { name: string; inject: string[]; apply: (ctx: unknown) => void }
 
@@ -87,7 +97,9 @@ describe('client bundle 装载', () => {
   it('apply registers the sidebar icon and the main panel without throwing', () => {
     const [entry] = loadBundle()
     const react = fakeReact()
-    const plugin = entry!.factory((name: string) => (name === 'react' ? react : undefined)) as {
+    const plugin = entry!.factory((name: string) =>
+      name === 'react' ? react : name === 'react/jsx-runtime' || name === 'react/jsx-dev-runtime' ? fakeJsxRuntime() : undefined,
+    ) as {
       apply: (ctx: unknown) => void
     }
 
@@ -132,7 +144,9 @@ describe('client bundle 装载', () => {
   it('registers dictionaries through the locale service when it exists', () => {
     const [entry] = loadBundle()
     const react = fakeReact()
-    const plugin = entry!.factory((name: string) => (name === 'react' ? react : undefined)) as {
+    const plugin = entry!.factory((name: string) =>
+      name === 'react' ? react : name === 'react/jsx-runtime' || name === 'react/jsx-dev-runtime' ? fakeJsxRuntime() : undefined,
+    ) as {
       apply: (ctx: unknown) => void
     }
     let registered: Record<string, unknown> | undefined

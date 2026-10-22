@@ -13,7 +13,14 @@ export interface ScanIssue {
 }
 
 /** 派生 Markdown 不是记忆条目：persona/PROFILE.md 就落在条目目录里 */
-const DERIVED_MARKDOWN = new Set(['PROFILE.md', 'INDEX.md'])
+const DERIVED_MARKDOWN = new Set(['PROFILE.MD', 'INDEX.MD'])
+function isDerivedMarkdown(rel: string): boolean {
+  return DERIVED_MARKDOWN.has(path.posix.basename(rel).toUpperCase())
+}
+function baseIdOf(rel: string): string {
+  const name = path.posix.basename(rel)
+  return name.toLowerCase().endsWith('.md') ? name.slice(0, -3) : name
+}
 
 export interface ScanResult {
   entries: Entry[]
@@ -113,7 +120,7 @@ export class MemoryStore {
     const entries: Entry[] = []
     const issues: ScanIssue[] = []
     for (const rel of await walkMarkdown(this.root, await this.scanDirs())) {
-      if (DERIVED_MARKDOWN.has(path.posix.basename(rel))) continue
+      if (isDerivedMarkdown(rel)) continue
       const text = await readTextFile(resolveInRoot(this.root, rel))
       if (text === null) continue
       try {
@@ -246,7 +253,7 @@ export class MemoryStore {
       deleted.push(entry.rel)
     }
     for (const rel of await walkMarkdown(this.root, [DIRS.archive])) {
-      if (path.posix.basename(rel, '.md') === id) {
+      if (baseIdOf(rel) === id) {
         await rm(resolveInRoot(this.root, rel), { force: true })
         deleted.push(rel)
       }
