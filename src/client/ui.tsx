@@ -594,7 +594,13 @@ export function Dialog(props: {
       }
     }
     window.addEventListener('keydown', onKey)
-    const timer = window.setTimeout(() => panelRef.current?.focus(), 20)
+    const timer = window.setTimeout(() => {
+      const panel = panelRef.current
+      if (!panel) return
+      // 焦点已经在对话框里（例如 autoFocus 的输入框）就绝不抢——抢了之后用户打不了字
+      if (panel.contains(document.activeElement)) return
+      panel.focus()
+    }, 20)
     return () => {
       window.removeEventListener('keydown', onKey)
       window.clearTimeout(timer)

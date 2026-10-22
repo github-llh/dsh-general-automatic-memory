@@ -11,7 +11,7 @@ import { extractFromTurn, normalizeDates } from '../src/host/ingest/extract.js'
 import { extractWithLlm } from '../src/host/ingest/llm-extract.js'
 import { gateCandidate } from '../src/host/ingest/gate.js'
 import { ImportService } from '../src/host/importers/index.js'
-import { decompressZstdFrames, parseDshSession, parseGenericJsonl } from '../src/host/importers/conversation.js'
+import { decompressZstdFrames, mineTurns, parseCodexSession, parseDshSession, parseGenericJsonl } from '../src/host/importers/conversation.js'
 import { MemoryStore } from '../src/host/store.js'
 import type { SearchHit } from '../src/host/api.js'
 import type { Candidate } from '../src/host/ingest/extract.js'
@@ -275,6 +275,43 @@ describe('会话解析', () => {
     expect(turns).toHaveLength(2)
     expect(turns[0]!.userMessages).toEqual(['以后别加总结'])
   })
+
+  it('parses codex rollout sessions, skipping developer instructions', () => {
+    const jsonl = [
+      { type: 'session_meta', payload: { session_id: 's1', cwd: '/repo/demo' } },
+      { type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'You are Codex.' }] } },
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '以后不要在回复末尾加总结' }] } },
+      { type: 'response_item', payload: { type: 'function_call', name: 'exec' } },
+      { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '好的。' }] } },
+      { type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1' } },
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: 't2' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '张三负责 data-platform-server' }] } },
+      { type: 'event_msg', payload: { type: 'task_complete', turn_id: 't2' } },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join('\n')
+    const turns = parseCodexSession(jsonl, '/tmp/rollout.jsonl')
+    expect(turns).toHaveLength(2)
+    expect(turns[0]!.userMessages).toEqual(['以后不要在回复末尾加总结'])
+    expect(turns[0]!.assistantMessages).toEqual(['好的。'])
+    expect(turns[1]!.userMessages[0]).toContain('张三')
+    expect(turns.flatMap((turn) => turn.assistantMessages).join('')).not.toContain('Codex')
+  })
+
+  it('drops injected context and command echoes before mining', () => {
+    const turns = [
+      { index: 0, userMessages: ['# AGENTS.md instructions\n\n<INSTRUCTIONS>\n始终用简体中文回复。'], assistantMessages: [], origin: '/tmp/a.jsonl' },
+      { index: 1, userMessages: ['Base directory for this skill: /Users/x/.agents/skills/foo\n\n# foo'], assistantMessages: [], origin: '/tmp/a.jsonl' },
+      { index: 2, userMessages: ['/bin/sh /Users/x/dev/maven/bin/mvn -Didea.version=2026.1.2'], assistantMessages: [], origin: '/tmp/a.jsonl' },
+      { index: 3, userMessages: ['This session is being continued from a previous conversation that ran out of context.'], assistantMessages: [], origin: '/tmp/a.jsonl' },
+      { index: 4, userMessages: ['<environment_context>\n<cwd>/repo</cwd>\n</environment_context>'], assistantMessages: [], origin: '/tmp/a.jsonl' },
+      { index: 5, userMessages: ['张三负责 data-platform-server'], assistantMessages: [], origin: '/tmp/a.jsonl' },
+    ]
+    const items = mineTurns(turns, { limit: 50 })
+    expect(items).toHaveLength(1)
+    expect(items[0]!.title).toContain('张三')
+  })
 })
 
 describe('导入服务（记忆文件）', () => {
@@ -305,7 +342,7 @@ describe('导入服务（记忆文件）', () => {
     }
   })
 
-  it('applies a selected subset, creates a snapshot, and dedupes on rescan', async () => {
+  it('applies a selected subset, creates a snapshot, and skips already-imported items on rescan', async () => {
     const api = await createService(DEFAULT_CONFIG)
     const ingestor = new Ingestor(api, DEFAULT_CONFIG)
     const importer = new ImportService(api, ingestor, DEFAULT_CONFIG)
@@ -318,10 +355,36 @@ describe('导入服务（记忆文件）', () => {
       expect(applied.snapshot).toContain('import')
       expect(api.list().length).toBeGreaterThanOrEqual(1)
 
-      // 再扫一次：已导入的条目应被识别为 duplicate/merged，而不是再新增一遍
+      // 再扫一次：同一来源导入过的条目直接出局，不再进候选列表制造冗余
       const again = await importer.scan('generic-dir', { path: src, limit: 50 })
-      const dup = again.items.filter((item) => item.duplicateOf !== undefined)
-      expect(dup.length).toBeGreaterThan(0)
+      expect(again.estimate.alreadyImported).toBeGreaterThanOrEqual(2)
+      const titles = again.items.map((item) => item.title)
+      expect(titles).not.toContain('提交规范')
+      expect(titles).not.toContain('鉴权')
+      expect(again.skipped.some((row) => row.reason === 'already-imported')).toBe(true)
+    } finally {
+      await rm(src, { recursive: true, force: true })
+    }
+  })
+
+  it('offers new content from a source file that grew since the last import', async () => {
+    const api = await createService(DEFAULT_CONFIG)
+    const ingestor = new Ingestor(api, DEFAULT_CONFIG)
+    const importer = new ImportService(api, ingestor, DEFAULT_CONFIG)
+    const src = await mkdtemp(path.join(tmpdir(), 'gam-grow-'))
+    const file = path.join(src, 'rules.md')
+    try {
+      await writeFile(file, '# 团队约定\n\n## 提交规范\n\n提交信息用中文，正文说明为什么改。\n', 'utf8')
+      const first = await importer.scan('generic-dir', { path: src, limit: 50 })
+      await importer.apply(first.scanId, first.items.map((item) => item.key))
+      expect(api.list()).toHaveLength(1)
+
+      // 文件新增一节：旧条目不重复出现，新节应当被扫出来
+      await writeFile(file, '# 团队约定\n\n## 提交规范\n\n提交信息用中文，正文说明为什么改。\n\n## 部署\n\n部署走 GitHub Actions，不要手工 scp。\n', 'utf8')
+      const second = await importer.scan('generic-dir', { path: src, limit: 50 })
+      expect(second.estimate.alreadyImported).toBe(1)
+      expect(second.items.map((item) => item.title)).toContain('部署')
+      expect(second.items.map((item) => item.title)).not.toContain('提交规范')
     } finally {
       await rm(src, { recursive: true, force: true })
     }

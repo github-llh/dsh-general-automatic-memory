@@ -162,3 +162,44 @@ describe('L1 FTS5 索引', () => {
     expect(again.search('鉴权').length).toBeGreaterThan(0)
   })
 })
+
+describe('召回统计持久化', () => {
+  it('survives a restart instead of resetting the overview to zero', async () => {
+    const api = await createService()
+    api.snapshotFor('s1', { mode: 'full' })
+    api.snapshotFor('s1', { mode: 'full' })
+    api.noteRecall(['m_1'])
+    await api.flushRecallStats()
+    expect((await api.stats()).recall.inject.events).toBe(2)
+
+    // 模拟重启：新实例从 .cache/recall-stats.json 恢复计数
+    const restarted = await createService()
+    const recall = (await restarted.stats()).recall
+    expect(recall.inject.events).toBe(2)
+    expect(recall.tool.events).toBe(1)
+    expect(recall.tool.hits).toBe(1)
+    expect(recall.maxShare).toBe(DEFAULT_CONFIG.budget.maxShareOfRequest)
+  })
+
+  it('throttles repeated flushes so the hot path does not hammer the disk', async () => {
+    const api = await createService()
+    api.snapshotFor('s1', { mode: 'full' })
+    await api.flushRecallStats()
+    api.snapshotFor('s1', { mode: 'full' })
+    await api.flushRecallStats()
+    const restarted = await createService()
+    // 第二次 flush 在 30s 窗口内被合并，只应保留第一次的 1 次
+    expect((await restarted.stats()).recall.inject.events).toBe(1)
+  })
+
+  it('counts a slim step as no-show, not as a zero-hit', async () => {
+    const api = await createService()
+    await api.create({ kind: 'project', title: '部署走 CI', summary: '不要手工 scp', body: 'GitHub Actions。', source: 'user-stated' })
+    api.snapshotFor('s1', { mode: 'slim' })
+    api.snapshotFor('s1', { mode: 'full' })
+    const recall = (await api.stats()).recall
+    expect(recall.inject.events).toBe(2)
+    expect(recall.inject.zeroHit).toBe(0)
+    expect(recall.inject.hits).toBe(1)
+  })
+})

@@ -62,6 +62,9 @@ export function registerIngest(ctx: HostContext, ingestor: Ingestor, config: Mem
   disposers.push(
     ctx.on('session/event', ((session: unknown, event: { type?: string; data?: unknown }) => {
       const key = sessionKeyOf(session)
+      // 会话工作目录：导入来源按用户的 workspace 扫，宿主进程 cwd 指不到那儿
+      const cwd = (session as { cwd?: unknown } | null | undefined)?.cwd
+      if (typeof cwd === 'string' && cwd.length > 0) ingestor.noteWorkspaceCwd(cwd)
       const type = event?.type ?? ''
       const data = (event?.data ?? {}) as Record<string, unknown>
 

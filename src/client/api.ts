@@ -141,7 +141,7 @@ export interface ScanReportView {
   label: string
   items: ImportItemView[]
   skipped: Array<{ origin: string; reason: string }>
-  estimate: { added: number; merged: number; duplicate: number; pii: number }
+  estimate: { added: number; merged: number; duplicate: number; alreadyImported: number; pii: number }
   budget?: { alwaysEntries: number; alwaysChars: number; overBudget: boolean }
 }
 

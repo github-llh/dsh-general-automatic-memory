@@ -565,6 +565,7 @@ function Overview(props: CommonProps & { onBrowseKind: (kind: string) => void })
           footer={
             <>
               <div className="gam-stat-row"><span>{t('overview.zeroHit')}</span><b>{(zeroHitRate * 100).toFixed(0)}%</b></div>
+              <div className="gam-stat-row"><span>{t('overview.injectHits')}</span><b>{formatNumber(stats.recall.inject.hits)}</b></div>
               <div className="gam-stat-row"><span>{t('overview.gated')}</span><b>{formatNumber(stats.recall.inject.gated)}</b></div>
               <div className="gam-stat-row"><span>{t('overview.hits')}</span><b>{formatNumber(stats.recall.tool.hits)}</b></div>
             </>
@@ -1377,6 +1378,7 @@ type ItemFilter = 'all' | 'new' | 'existing' | 'pii'
 function ImportView(props: CommonProps): ReactNode {
   const t = props.t
   const [sources, setSources] = useState<ImportSourceStatus[]>([])
+  const [scanRoot, setScanRoot] = useState('')
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
   const [scan, setScan] = useState<ScanReportView | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -1392,7 +1394,10 @@ function ImportView(props: CommonProps): ReactNode {
 
   const loadSources = useCallback(() => {
     api.importSources()
-      .then((result) => setSources(result.sources))
+      .then((result) => {
+        setSources(result.sources)
+        setScanRoot(result.cwd)
+      })
       .catch((cause: Error) => setError(cause.message))
   }, [])
 
@@ -1515,10 +1520,21 @@ function ImportView(props: CommonProps): ReactNode {
             <Badge tone="accent">{t('import.merge')} {scan.estimate.merged}</Badge>
             <Badge>{t('import.duplicate')} {scan.estimate.duplicate}</Badge>
             {scan.estimate.pii > 0 ? <Badge tone="danger">PII {scan.estimate.pii}</Badge> : null}
+            {scan.estimate.alreadyImported > 0 ? (
+              <Badge tone="warn">
+                {t('import.alreadyImported')} {scan.estimate.alreadyImported}
+              </Badge>
+            ) : null}
             {scan.budget?.overBudget ? <Badge tone="warn">{t('import.budgetWarn')}</Badge> : null}
             <span className="gam-spacer" />
             <Button size="sm" variant="ghost" onClick={() => { setScan(null); setSelected(new Set()) }}>{t('import.cancel')}</Button>
           </div>
+
+          {scan.estimate.alreadyImported > 0 ? (
+            <div className="gam-muted" style={{ fontSize: 11 }}>
+              {t('import.alreadyImportedNote')}
+            </div>
+          ) : null}
 
           {scan.skipped.length > 0 ? (
             <div className="gam-muted" style={{ fontSize: 11 }}>
@@ -1613,6 +1629,12 @@ function ImportView(props: CommonProps): ReactNode {
             <span className="gam-spacer" />
             <span className="gam-faint">{t('import.scanOnlyHint')}</span>
           </div>
+
+          {scanRoot ? (
+            <div className="gam-muted" style={{ fontSize: 11 }}>
+              {t('import.scanRoot')}: <span className="gam-mono">{scanRoot}</span>
+            </div>
+          ) : null}
 
           {filteredSources.length === 0 ? (
             <EmptyState icon={<IconFolder size={20} />} title={t('import.noSources')} description={t('import.noSourcesDesc')} />

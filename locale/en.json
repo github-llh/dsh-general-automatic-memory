@@ -115,7 +115,8 @@
     "warnings": "warnings",
     "pending": "pending",
     "fixNow": "Check and fix",
-    "doctorDone": "Check complete · {n} derived files rebuilt"
+    "doctorDone": "Check complete · {n} derived files rebuilt",
+    "injectHits": "Injected hits"
   },
   "browse": {
     "desc": "Search, filter and edit long-term memory directly.",
@@ -227,7 +228,11 @@
     "noop": "Already present",
     "rejected": "Blocked",
     "viewMemories": "View memories",
-    "continue": "Import more"
+    "continue": "Import more",
+    "scanRoot": "Scan root",
+    "alreadyImported": "Already imported",
+    "alreadyImportedHint": "These entries were imported from the same source before and are skipped",
+    "alreadyImportedNote": "Already-imported entries stay out of the list to avoid redundancy; new content in the same source is still picked up."
   },
   "confirm": {
     "prompt": "Remember this?",

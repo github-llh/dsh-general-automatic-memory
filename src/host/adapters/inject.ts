@@ -72,6 +72,7 @@ export function registerInjection(ctx: HostContext, api: MemoryService, config: 
         if (event?.type === 'turn/end') {
           // hits 延迟刷盘：立刻写回条目会让下一次渲染指纹变化（原则 P4）
           void api.flushHits()
+          void api.flushRecallStats()
         }
         if (event?.type === 'tool/call') {
           const paths = extractTouchedPaths(event)
@@ -118,9 +119,13 @@ export function registerInjection(ctx: HostContext, api: MemoryService, config: 
         if (catalog.length > 0) catalogBySession.set(key, catalog)
         else catalogBySession.delete(key)
 
-        // 注入占比遥测（面板预算水位的数据源）
-        const total = measureTotal(ctx, payload)
-        if (total > 0) api.setRequestShare(snapshot.tokens / total)
+        // 注入占比遥测（面板预算水位的数据源）。
+        // 只在真正注入了内容且不是 slim 态时测量：tokenMeter.measure 会克隆整条
+        // 会话表面，每步都调太贵；slim 态本来就只复读常驻层。
+        if (snapshot.chars.total > 0 && mode !== 'slim') {
+          const total = measureTotal(ctx, payload)
+          if (total > 0) api.setRequestShare(snapshot.tokens / total)
+        }
         return decision
       }) as never) as () => void,
     )
@@ -269,13 +274,16 @@ export function extractTouchedPaths(event: { type?: string; data?: unknown }): s
   return [...out]
 }
 
-function measureTotal(ctx: HostContext, decision: unknown): number {
+function measureTotal(ctx: HostContext, payload: unknown): number {
   const meter = ctx.get('tokenMeter') as HostContext['tokenMeter']
   if (!meter?.measure) return 0
-  const session = (decision as { session?: unknown })?.session
+  // pre-step 的 payload 是 { agent, messages, turn, step, signal }——会话挂在 agent 上，
+  // 没有 decision.session 这个字段（旧实现读错形状，占比遥测因此永远是 0）。
+  const session = (payload as { agent?: { session?: unknown } } | undefined)?.agent?.session
   if (!session) return 0
   try {
-    return meter.measure(session, (decision as { requestHeader?: unknown }).requestHeader)?.totalTokens ?? 0
+    const header = (session as { requestHeader?: () => unknown }).requestHeader?.()
+    return meter.measure(session, header)?.totalTokens ?? 0
   } catch {
     return 0
   }

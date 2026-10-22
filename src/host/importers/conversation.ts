@@ -72,6 +72,14 @@ async function readMaybeZstd(abs: string): Promise<string | null> {
   }
 }
 
+async function isDir(target: string): Promise<boolean> {
+  try {
+    return (await stat(target)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 function textOfContent(content: unknown): string {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
@@ -153,6 +161,56 @@ export function parseClaudeSession(text: string, origin: string): ConversationTu
     }
   }
   if (current && current.userMessages.length > 0) turns.push(current)
+  return turns
+}
+
+/**
+ * Codex rollout jsonl：`{type, payload}` 记录流。
+ *
+ * - `event_msg/task_started` / `task_complete` 划轮边界
+ * - `response_item/message` 的 `payload.role` 为 user/assistant（developer 是系统指令，跳过）
+ * - 文本块是 `input_text` / `output_text`
+ */
+export function parseCodexSession(text: string, origin: string): ConversationTurn[] {
+  const turns: ConversationTurn[] = []
+  let current: ConversationTurn | null = null
+  const flush = () => {
+    if (current && (current.userMessages.length > 0 || current.assistantMessages.length > 0)) turns.push(current)
+    current = null
+  }
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    let record: { type?: string; payload?: Record<string, unknown> }
+    try {
+      record = JSON.parse(line) as typeof record
+    } catch {
+      continue
+    }
+    const type = record.type ?? ''
+    const payload = record.payload
+    if (type === 'event_msg') {
+      const kind = String(payload?.type ?? '')
+      if (kind === 'task_started') flush()
+      else if (kind === 'task_complete') flush()
+      continue
+    }
+    if (type !== 'response_item' || !payload || payload.type !== 'message') continue
+    const role = String(payload.role ?? '')
+    if (role !== 'user' && role !== 'assistant') continue
+    const blocks = Array.isArray(payload.content) ? payload.content : []
+    const parts: string[] = []
+    for (const block of blocks) {
+      if (!block || typeof block !== 'object') continue
+      const text2 = (block as { text?: unknown }).text
+      if (typeof text2 === 'string' && text2.trim()) parts.push(text2)
+    }
+    const content = parts.join('\n').trim()
+    if (!content) continue
+    if (!current) current = { index: turns.length, userMessages: [], assistantMessages: [], origin }
+    if (role === 'user') current.userMessages.push(content)
+    else current.assistantMessages.push(content)
+  }
+  flush()
   return turns
 }
 
@@ -243,12 +301,35 @@ async function collectSessionFiles(root: string, pattern: (name: string) => bool
   return out
 }
 
-function mineTurns(turns: ConversationTurn[], options: ScanOptions): ImportItem[] {
+/**
+ * 注入式上下文与命令回显。
+ *
+ * 各 agent 把技能说明、AGENTS.md 指令、环境上下文、shell 命令回显也记成 user 消息。
+ * 不滤掉的话，它们会被当成「用户原话」挖成记忆——纯噪声。所有会话来源共用。
+ */
+const INJECTED_USER_NOISE: RegExp[] = [
+  /^\s*#\s*AGENTS\.md instructions\b/i,
+  /^\s*<INSTRUCTIONS>/,
+  /^\s*<(environment_context|user_instructions|system-reminder|command-name|command-message|command-args|local-command|recommended_plugins)/i,
+  /^\s*Base directory for this skill\b/i,
+  /^\s*The following is the \w+ agent history\b/i,
+  /^\s*This session is being continued from a\b/i,
+  /^\s*(?:!\s*)?(?:\/bin\/(?:ba)?sh|\/usr\/bin\/env)\b/,
+]
+
+function isInjectedNoise(text: string): boolean {
+  const head = text.slice(0, 400)
+  return INJECTED_USER_NOISE.some((rx) => rx.test(head))
+}
+
+export function mineTurns(turns: ConversationTurn[], options: ScanOptions): ImportItem[] {
   const maxTurns = options.maxTurns ?? 200
   const items: ImportItem[] = []
   for (const turn of turns.slice(0, maxTurns)) {
     if (items.length >= options.limit) break
-    const candidates = extractFromTurn({ userMessages: turn.userMessages })
+    const users = turn.userMessages.filter((message) => !isInjectedNoise(message))
+    if (users.length === 0) continue
+    const candidates = extractFromTurn({ userMessages: users })
     items.push(...candidatesToItems(candidates, turn.origin, 'dsh-sessions', items.length))
   }
   return items.slice(0, options.limit)
@@ -317,6 +398,109 @@ const claudeSessions: SourceDescriptor = {
   },
 }
 
+const codexSessions: SourceDescriptor = {
+  id: 'codex-sessions',
+  label: 'Codex 历史会话（rollout jsonl）',
+  kind: 'conversation',
+  async detect() {
+    const roots = [path.join(homedir(), '.codex', 'sessions'), path.join(homedir(), '.codex', 'archived_sessions')]
+    const found: string[] = []
+    for (const root of roots) {
+      if ((await collectCodexFiles([root])).length > 0) found.push(root)
+    }
+    return found
+  },
+  async scan(_cwd, options) {
+    const roots = [path.join(homedir(), '.codex', 'sessions'), path.join(homedir(), '.codex', 'archived_sessions')]
+    const files = await collectCodexFiles(roots)
+    const items: ImportItem[] = []
+    const skipped: SkippedFile[] = []
+    for (const abs of files) {
+      if (items.length >= options.limit) break
+      const text = await readMaybeZstd(abs)
+      if (!text) {
+        skipped.push({ origin: abs, reason: 'unreadable' })
+        continue
+      }
+      const turns = parseCodexSession(text, abs)
+      for (const entry of mineTurns(turns, { ...options, limit: options.limit - items.length, maxTurns: options.maxTurns })) {
+        items.push({ ...entry, source: 'codex-sessions', key: `codex-sessions:${path.basename(abs)}:${items.length}` })
+      }
+    }
+    return { items, skipped }
+  },
+}
+
+/** Codex 的会话日志：活跃 sessions/ 与归档 archived_sessions/，含 .jsonl.zst 压缩归档 */
+async function collectCodexFiles(roots: string[]): Promise<string[]> {
+  const out: string[] = []
+  for (const root of roots) {
+    out.push(
+      ...(await collectSessionFiles(
+        root,
+        (name) =>
+          name.toLowerCase().startsWith('rollout-') &&
+          (hasExtension(name, '.jsonl') || hasExtension(name, '.jsonl.zst') || hasExtension(name, '.zst')),
+      )),
+    )
+  }
+  return out
+}
+
+const qoderSessions: SourceDescriptor = {
+  id: 'qoder-sessions',
+  label: 'Qoder 历史会话（jsonl）',
+  kind: 'conversation',
+  async detect() {
+    const files = await collectQoderSessionFiles()
+    return files.length > 0 ? [path.join(homedir(), '.qoder', 'projects')] : []
+  },
+  async scan(_cwd, options) {
+    const files = await collectQoderSessionFiles()
+    const items: ImportItem[] = []
+    const skipped: SkippedFile[] = []
+    for (const abs of files) {
+      if (items.length >= options.limit) break
+      const text = await readMaybeZstd(abs)
+      if (!text) {
+        skipped.push({ origin: abs, reason: 'unreadable' })
+        continue
+      }
+      const turns = parseClaudeSession(text, abs)
+      for (const entry of mineTurns(turns, { ...options, limit: options.limit - items.length, maxTurns: options.maxTurns })) {
+        items.push({ ...entry, source: 'qoder-sessions', key: `qoder-sessions:${path.basename(abs)}:${items.length}` })
+      }
+    }
+    return { items, skipped }
+  },
+}
+
+/** Qoder 会话：`~/.qoder/projects/<slug>/<uuid>.jsonl`；subagents/ 子目录是派生记录，跳过 */
+async function collectQoderSessionFiles(): Promise<string[]> {
+  const root = path.join(homedir(), '.qoder', 'projects')
+  if (!(await isDir(root))) return []
+  const out: string[] = []
+  try {
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const projectDir = path.join(root, entry.name)
+      let files
+      try {
+        files = await readdir(projectDir, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const file of files.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        if (!file.isFile() || !hasExtension(file.name, '.jsonl')) continue
+        out.push(path.join(projectDir, file.name))
+      }
+    }
+  } catch {
+    return []
+  }
+  return out
+}
+
 const genericConversation = (id: 'generic-jsonl' | 'generic-markdown', label: string): SourceDescriptor => ({
   id,
   label,
@@ -339,6 +523,8 @@ const genericConversation = (id: 'generic-jsonl' | 'generic-markdown', label: st
 export const CONVERSATION_SOURCES: SourceDescriptor[] = [
   dshSessions,
   claudeSessions,
+  codexSessions,
+  qoderSessions,
   genericConversation('generic-jsonl', '通用 jsonl 对话'),
   genericConversation('generic-markdown', '导出的 Markdown 对话'),
 ]

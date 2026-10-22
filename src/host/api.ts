@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import path from 'node:path'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { audit as writeAudit, type AuditAct } from './audit.js'
 import { derivedFiles, writeDerived, renderIndex, INDEX_LIMITS } from './catalog.js'
 import { readTextFile, resolveInRoot, writeFileAtomic } from './files.js'
@@ -78,6 +79,7 @@ export class MemoryService {
     const deviceId = await ensureDeviceId(root)
     const service = new MemoryService(root, config, deviceId)
     await service.store.init(deviceId)
+    service.loadRecallStats()
     await service.refresh()
     return service
   }
@@ -94,6 +96,7 @@ export class MemoryService {
   dispose(): void {
     this.fts?.close()
     this.fts = null
+    this.persistRecallStatsSync()
   }
 
   /** 重新扫描条目并重建派生索引。写入后调用；启动时调用一次。 */
@@ -290,6 +293,87 @@ export class MemoryService {
     this.recall.inject.gated += count
   }
 
+  // ---------------------------------------------------------------------------
+  // 召回统计持久化
+  //
+  // 召回/注入计数只存内存的话，每次重启 dsh 面板就全部归零——用户明明看见记忆被
+  // 引用，总览却是 0，等于没有可观测性。落盘在 `.cache/recall-stats.json`：
+  // 可再生的遥测数据，不进条目扫描、不进同步。
+  // ---------------------------------------------------------------------------
+
+  private recallFlushedAt = 0
+
+  private get recallStatsPath(): string {
+    return resolveInRoot(this.root, path.posix.join(DIRS.cache, 'recall-stats.json'))
+  }
+
+  private loadRecallStats(): void {
+    let text: string | null = null
+    try {
+      text = readFileSync(this.recallStatsPath, 'utf8')
+    } catch {
+      return
+    }
+    try {
+      const parsed = JSON.parse(text) as { version?: number; recall?: unknown }
+      if (parsed.version !== 1 || !parsed.recall || typeof parsed.recall !== 'object') return
+      const loaded = parsed.recall as RecallStats
+      const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0)
+      this.recall = {
+        inject: {
+          events: num(loaded.inject?.events),
+          hits: num(loaded.inject?.hits),
+          verbatim: num(loaded.inject?.verbatim),
+          zeroHit: num(loaded.inject?.zeroHit),
+          chars: num(loaded.inject?.chars),
+          tokens: num(loaded.inject?.tokens),
+          gated: num(loaded.inject?.gated),
+        },
+        tool: {
+          events: num(loaded.tool?.events),
+          hits: num(loaded.tool?.hits),
+          zeroHit: num(loaded.tool?.zeroHit),
+        },
+        lastShare: 0,
+        maxShare: this.config.budget.maxShareOfRequest,
+      }
+    } catch {
+      // 损坏的统计文件当作没有：遥测数据不值得让插件启动失败
+    }
+  }
+
+  /** 落盘一次召回统计；30s 内重复调用会被合并，热路径不打满磁盘 */
+  async flushRecallStats(): Promise<void> {
+    const now = Date.now()
+    if (now - this.recallFlushedAt < 30_000) return
+    this.recallFlushedAt = now
+    await this.persistRecallStats()
+  }
+
+  private async persistRecallStats(): Promise<void> {
+    const abs = this.recallStatsPath
+    const body = `${JSON.stringify({ version: 1, updatedAt: isoNow(), recall: this.recall }, null, 2)}\n`
+    try {
+      await writeFileAtomic(abs, body)
+    } catch {
+      // 遥测写不出去不影响主流程
+    }
+  }
+
+  /** 同步落盘：插件卸载（应用退出）时最后那点计数也要留住 */
+  private persistRecallStatsSync(): void {
+    const abs = this.recallStatsPath
+    const body = `${JSON.stringify({ version: 1, updatedAt: isoNow(), recall: this.recall }, null, 2)}\n`
+    try {
+      mkdirSync(path.dirname(abs), { recursive: true })
+      const tmp = `${abs}.${process.pid}.tmp`
+      writeFileSync(tmp, body, 'utf8')
+      renameSync(tmp, abs)
+    } catch {
+      // 同上
+    }
+  }
+
   private pendingHits: string[] = []
 
   async flushHits(): Promise<void> {
@@ -332,7 +416,8 @@ export class MemoryService {
     this.recall.inject.tokens += result.tokens
     this.recall.inject.hits += result.shown
     if (verbatim) this.recall.inject.verbatim++
-    if (result.shown === 0 && this.entries.length > 0) this.recall.inject.zeroHit++
+    // slim 态按设计就不给目录层，不能算「零命中」——否则节流会把指标淹成假警报
+    if (result.shown === 0 && result.mode !== 'slim' && this.entries.length > 0) this.recall.inject.zeroHit++
     return result
   }
 
@@ -340,6 +425,22 @@ export class MemoryService {
     this.recall.lastShare = Number(share.toFixed(4))
     this.recall.maxShare = this.config.budget.maxShareOfRequest
   }
+
+  /**
+   * 记录会话工作目录。导入来源探测（Cursor rules、Cline、Copilot…）要按**用户的
+   * 工作区**扫，而宿主进程的 cwd 是 dsh profile 目录，扫那里永远一无所获。
+   */
+  noteWorkspaceCwd(cwd: string): void {
+    if (typeof cwd !== 'string' || cwd.length === 0) return
+    const absolute = cwd.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(cwd)
+    if (absolute) this.lastCwd = cwd
+  }
+
+  lastWorkspaceCwd(): string | undefined {
+    return this.lastCwd
+  }
+
+  private lastCwd: string | undefined
 
   throttleFor(sessionKey: string): Throttle {
     let throttle = this.throttles.get(sessionKey)
@@ -363,6 +464,8 @@ export class MemoryService {
     }
     const lines = this.indexText.split('\n').length
     const indexBytes = Buffer.byteLength(this.indexText, 'utf8')
+    // 上限来自配置：没测到占比时也要显示真实上限，而不是 0
+    this.recall.maxShare = this.config.budget.maxShareOfRequest
     return {
       root: this.root,
       ready: this.loaded,
@@ -383,7 +486,6 @@ export class MemoryService {
       alerts: this.buildAlerts(),
     }
   }
-
   private buildAlerts(): Alert[] {
     const alerts: Alert[] = []
     for (const issue of this.issues.slice(0, 5)) {

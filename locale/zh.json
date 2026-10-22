@@ -115,7 +115,8 @@
     "warnings": "警告",
     "pending": "待确认",
     "fixNow": "体检并修复",
-    "doctorDone": "体检完成 · 重建 {n} 个派生文件"
+    "doctorDone": "体检完成 · 重建 {n} 个派生文件",
+    "injectHits": "注入命中"
   },
   "browse": {
     "desc": "搜索、筛选与直接编辑长期记忆。",
@@ -227,7 +228,11 @@
     "noop": "已存在",
     "rejected": "被拦截",
     "viewMemories": "查看记忆",
-    "continue": "继续导入"
+    "continue": "继续导入",
+    "scanRoot": "扫描目录",
+    "alreadyImported": "已导入过",
+    "alreadyImportedHint": "这些条目此前已从同一来源导入，本次直接跳过",
+    "alreadyImportedNote": "已导入过的条目不再进入列表，避免重复冗余；来源文件新增内容仍会被扫出来。"
   },
   "confirm": {
     "prompt": "要记住这条吗？",

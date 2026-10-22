@@ -124,7 +124,8 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"warnings": "warnings",
 			"pending": "pending",
 			"fixNow": "Check and fix",
-			"doctorDone": "Check complete · {n} derived files rebuilt"
+			"doctorDone": "Check complete · {n} derived files rebuilt",
+			"injectHits": "Injected hits"
 		},
 		browse: {
 			"desc": "Search, filter and edit long-term memory directly.",
@@ -236,7 +237,11 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"noop": "Already present",
 			"rejected": "Blocked",
 			"viewMemories": "View memories",
-			"continue": "Import more"
+			"continue": "Import more",
+			"scanRoot": "Scan root",
+			"alreadyImported": "Already imported",
+			"alreadyImportedHint": "These entries were imported from the same source before and are skipped",
+			"alreadyImportedNote": "Already-imported entries stay out of the list to avoid redundancy; new content in the same source is still picked up."
 		},
 		confirm: {
 			"prompt": "Remember this?",
@@ -647,7 +652,8 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"warnings": "警告",
 			"pending": "待确认",
 			"fixNow": "体检并修复",
-			"doctorDone": "体检完成 · 重建 {n} 个派生文件"
+			"doctorDone": "体检完成 · 重建 {n} 个派生文件",
+			"injectHits": "注入命中"
 		},
 		browse: {
 			"desc": "搜索、筛选与直接编辑长期记忆。",
@@ -759,7 +765,11 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"noop": "已存在",
 			"rejected": "被拦截",
 			"viewMemories": "查看记忆",
-			"continue": "继续导入"
+			"continue": "继续导入",
+			"scanRoot": "扫描目录",
+			"alreadyImported": "已导入过",
+			"alreadyImportedHint": "这些条目此前已从同一来源导入，本次直接跳过",
+			"alreadyImportedNote": "已导入过的条目不再进入列表，避免重复冗余；来源文件新增内容仍会被扫出来。"
 		},
 		confirm: {
 			"prompt": "要记住这条吗？",
@@ -2926,7 +2936,12 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 				}
 			};
 			window.addEventListener("keydown", onKey);
-			const timer = window.setTimeout(() => panelRef.current?.focus(), 20);
+			const timer = window.setTimeout(() => {
+				const panel = panelRef.current;
+				if (!panel) return;
+				if (panel.contains(document.activeElement)) return;
+				panel.focus();
+			}, 20);
 			return () => {
 				window.removeEventListener("keydown", onKey);
 				window.clearTimeout(timer);
@@ -6998,6 +7013,10 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.injectHits") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(stats.recall.inject.hits) })]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "gam-stat-row",
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.gated") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(stats.recall.inject.gated) })]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -8297,6 +8316,7 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 	function ImportView(props) {
 		const t = props.t;
 		const [sources, setSources] = (0, react.useState)([]);
+		const [scanRoot, setScanRoot] = (0, react.useState)("");
 		const [sourceFilter, setSourceFilter] = (0, react.useState)("all");
 		const [scan, setScan] = (0, react.useState)(null);
 		const [selected, setSelected] = (0, react.useState)(/* @__PURE__ */ new Set());
@@ -8310,7 +8330,10 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 		const [pathValue, setPathValue] = (0, react.useState)("");
 		const [confirmApply, setConfirmApply] = (0, react.useState)(false);
 		const loadSources = (0, react.useCallback)(() => {
-			api.importSources().then((result) => setSources(result.sources)).catch((cause) => setError(cause.message));
+			api.importSources().then((result) => {
+				setSources(result.sources);
+				setScanRoot(result.cwd);
+			}).catch((cause) => setError(cause.message));
 		}, []);
 		(0, react.useEffect)(loadSources, [loadSources, props.version]);
 		const startScan = (source, path) => {
@@ -8520,6 +8543,14 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 								tone: "danger",
 								children: ["PII ", scan.estimate.pii]
 							}) : null,
+							scan.estimate.alreadyImported > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(Badge, {
+								tone: "warn",
+								children: [
+									t("import.alreadyImported"),
+									" ",
+									scan.estimate.alreadyImported
+								]
+							}) : null,
 							scan.budget?.overBudget ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Badge, {
 								tone: "warn",
 								children: t("import.budgetWarn")
@@ -8536,6 +8567,11 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 							})
 						]
 					}),
+					scan.estimate.alreadyImported > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "gam-muted",
+						style: { fontSize: 11 },
+						children: t("import.alreadyImportedNote")
+					}) : null,
 					scan.skipped.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "gam-muted",
 						style: { fontSize: 11 },
@@ -8691,76 +8727,91 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 						className: "gam-muted",
 						children: interpolate(t("import.scanning"), { name: busyLabel })
 					})]
-				}) }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "gam-toolbar",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Segmented, {
-							value: sourceFilter,
-							onChange: setSourceFilter,
-							ariaLabel: t("import.filterSources"),
-							options: [
-								{
-									value: "all",
-									label: `${t("import.filterAll")} ${sources.length}`
-								},
-								{
-									value: "detected",
-									label: `${t("import.detected")} ${detectedCount}`
-								},
-								{
-									value: "memory",
-									label: `${t("import.memory")} ${memoryCount}`
-								},
-								{
-									value: "conversation",
-									label: `${t("import.conversation")} ${conversationCount}`
-								}
-							]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "gam-spacer" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "gam-faint",
-							children: t("import.scanOnlyHint")
-						})
-					]
-				}), filteredSources.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EmptyState, {
-					icon: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconFolder, { size: 20 }),
-					title: t("import.noSources"),
-					description: t("import.noSourcesDesc")
-				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "gam-importgrid",
-					children: filteredSources.map((source) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-						type: "button",
-						className: "gam-source",
-						"data-detected": source.detected.length > 0 ? "true" : "false",
-						disabled: busy,
-						onClick: () => pickSource(source),
+				}) }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "gam-toolbar",
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "gam-source-head",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "gam-source-dot" }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "gam-source-title",
-										children: source.label
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "gam-source-count",
-										children: source.detected.length > 0 ? `${source.detected.length} ${t("import.places")}` : t("import.notDetected")
-									})
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Segmented, {
+								value: sourceFilter,
+								onChange: setSourceFilter,
+								ariaLabel: t("import.filterSources"),
+								options: [
+									{
+										value: "all",
+										label: `${t("import.filterAll")} ${sources.length}`
+									},
+									{
+										value: "detected",
+										label: `${t("import.detected")} ${detectedCount}`
+									},
+									{
+										value: "memory",
+										label: `${t("import.memory")} ${memoryCount}`
+									},
+									{
+										value: "conversation",
+										label: `${t("import.conversation")} ${conversationCount}`
+									}
 								]
 							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "gam-spacer" }),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "gam-source-path",
-								children: source.id === "generic-dir" ? t("import.genericHint") : source.detected[0] ?? t("import.notDetectedHint")
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "gam-source-cta",
-								children: [source.id === "generic-dir" ? t("import.chooseFolder") : t("import.scan"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconArrowRight, { size: 11 })]
+								className: "gam-faint",
+								children: t("import.scanOnlyHint")
 							})
 						]
-					}, source.id))
-				})] }),
+					}),
+					scanRoot ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "gam-muted",
+						style: { fontSize: 11 },
+						children: [
+							t("import.scanRoot"),
+							": ",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "gam-mono",
+								children: scanRoot
+							})
+						]
+					}) : null,
+					filteredSources.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EmptyState, {
+						icon: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconFolder, { size: 20 }),
+						title: t("import.noSources"),
+						description: t("import.noSourcesDesc")
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "gam-importgrid",
+						children: filteredSources.map((source) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							className: "gam-source",
+							"data-detected": source.detected.length > 0 ? "true" : "false",
+							disabled: busy,
+							onClick: () => pickSource(source),
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "gam-source-head",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "gam-source-dot" }),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "gam-source-title",
+											children: source.label
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "gam-source-count",
+											children: source.detected.length > 0 ? `${source.detected.length} ${t("import.places")}` : t("import.notDetected")
+										})
+									]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "gam-source-path",
+									children: source.id === "generic-dir" ? t("import.genericHint") : source.detected[0] ?? t("import.notDetectedHint")
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "gam-source-cta",
+									children: [source.id === "generic-dir" ? t("import.chooseFolder") : t("import.scan"), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconArrowRight, { size: 11 })]
+								})
+							]
+						}, source.id))
+					})
+				] }),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(Dialog, {
 					open: Boolean(pathSource),
 					title: t("import.genericTitle"),

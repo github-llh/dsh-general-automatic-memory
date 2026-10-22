@@ -54,8 +54,13 @@ export function registerFeatures(
   }
 
   // ---- 导入 -------------------------------------------------------------
+  // 默认 cwd 取最近一次会话的工作目录：项目级来源（Cursor rules、Cline、Copilot…）
+  // 必须按用户的 workspace 扫，宿主进程的 cwd 是 dsh profile 目录，扫那里永远扫不到。
+  const defaultCwd = (): string => deps.api.lastWorkspaceCwd() ?? process.cwd()
+  const workspaceCwd = (query: URLSearchParams): string => query.get('cwd') ?? defaultCwd()
+
   route('import/sources', async (_req, res, query) => {
-    const cwd = query.get('cwd') ?? process.cwd()
+    const cwd = workspaceCwd(query)
     send(res, 200, { cwd, sources: await deps.importer.sources(cwd) })
   })
 
@@ -66,7 +71,7 @@ export function registerFeatures(
       const source = String(body.source ?? '')
       if (!source) return send(res, 400, { error: 'source is required' })
       const report = await deps.importer.scan(source as never, {
-        ...(typeof body.cwd === 'string' ? { cwd: body.cwd } : {}),
+        cwd: typeof body.cwd === 'string' ? body.cwd : defaultCwd(),
         ...(typeof body.path === 'string' ? { path: body.path } : {}),
         ...(typeof body.limit === 'number' ? { limit: body.limit } : {}),
         ...(typeof body.maxTurns === 'number' ? { maxTurns: body.maxTurns } : {}),

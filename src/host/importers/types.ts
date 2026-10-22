@@ -17,6 +17,9 @@ export type ImportSourceId =
   | 'copilot-instructions'
   | 'gemini-md'
   | 'dsh-auto-memory'
+  | 'codex-sessions'
+  | 'qoder-memory'
+  | 'qoder-sessions'
   | 'generic-dir'
   | 'dsh-sessions'
   | 'claude-code-sessions'
@@ -54,8 +57,8 @@ export interface ScanReport {
   scannedPaths: string[]
   items: ImportItem[]
   skipped: SkippedFile[]
-  /** 预估影响：新增/合并/已存在 */
-  estimate: { added: number; merged: number; duplicate: number; pii: number }
+  /** 预估影响：新增/合并/已存在/已导入过（本次直接跳过） */
+  estimate: { added: number; merged: number; duplicate: number; alreadyImported: number; pii: number }
 }
 
 export interface ScanOptions {
@@ -65,6 +68,8 @@ export interface ScanOptions {
   path?: string
   /** 会话类来源：最多挖多少轮 */
   maxTurns?: number
+  /** 记忆根：来源文件落在根内时跳过，避免把本插件自己的存储当成导入源 */
+  excludeRoot?: string
 }
 
 export interface SourceDescriptor {

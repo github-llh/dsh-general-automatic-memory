@@ -58,6 +58,11 @@ export class Ingestor {
     return this.api.episodes
   }
 
+  /** 记录会话工作目录，供导入来源按真实 workspace 探测 */
+  noteWorkspaceCwd(cwd: string): void {
+    this.api.noteWorkspaceCwd(cwd)
+  }
+
   constructor(
     private readonly api: MemoryService,
     private readonly config: MemoryConfig,

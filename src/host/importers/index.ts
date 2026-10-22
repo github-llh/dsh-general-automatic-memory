@@ -70,18 +70,36 @@ export class ImportService {
       limit,
       ...(opts.path ? { path: opts.path } : {}),
       ...(opts.maxTurns ? { maxTurns: opts.maxTurns } : {}),
+      excludeRoot: this.api.root,
     })
 
     let added = 0
     let merged = 0
     let duplicate = 0
+    let alreadyImported = 0
     let pii = 0
-    for (const item of items) {
-      if (item.pii) pii++
-      const hits = this.api.search(`${item.title} ${item.summary}`, { kind: item.kind, limit: 1, scope: 'all' })
+    const fresh: ImportItem[] = []
+    const normalizeTitle = (title: string): string => title.trim().toLowerCase()
+    for (const scanned of items) {
+      if (scanned.pii) pii++
+      const hits = this.api.search(`${scanned.title} ${scanned.summary}`, { kind: scanned.kind, limit: 5, scope: 'all' })
+      // 同一来源文件导入过的条目直接跳过：重复导入只会制造冗余与混乱。
+      // 判定 = 同源 +（标题一致或高度相似）。标题一致是主信号，相关性只兜底
+      // （会话抽取的标题会随相对日期漂移），阈值放到 0.85 防止误杀同文件的新章节。
+      const sameOrigin = hits.find((hit) => {
+        if (hit.entry.meta.provenance.importedFrom !== scanned.origin) return false
+        if (normalizeTitle(hit.entry.meta.title) === normalizeTitle(scanned.title)) return true
+        return hit.parts.relevance >= 0.85
+      })
+      if (sameOrigin) {
+        alreadyImported++
+        skipped.push({ origin: scanned.origin, reason: 'already-imported' })
+        continue
+      }
+      fresh.push(scanned)
       const best = hits[0]
       if (best && best.parts.relevance >= 0.5) {
-        item.duplicateOf = best.entry.meta.id
+        scanned.duplicateOf = best.entry.meta.id
         if (best.parts.relevance >= 0.9) duplicate++
         else merged++
       } else {
@@ -90,7 +108,7 @@ export class ImportService {
     }
 
     const scanId = `s_${ulid().slice(2)}`
-    this.scans.set(scanId, { source: sourceId, items })
+    this.scans.set(scanId, { source: sourceId, items: fresh })
     // 只保留最近 10 次扫描，避免旧扫描占内存
     while (this.scans.size > 10) {
       const oldest = this.scans.keys().next().value
@@ -102,11 +120,11 @@ export class ImportService {
       scanId,
       source: sourceId,
       label: source.label,
-      detected: items.length > 0,
-      scannedPaths: [...new Set(items.map((item) => item.origin))],
-      items,
+      detected: fresh.length > 0 || skipped.length > 0,
+      scannedPaths: [...new Set(fresh.map((item) => item.origin))],
+      items: fresh,
       skipped,
-      estimate: { added, merged, duplicate, pii },
+      estimate: { added, merged, duplicate, alreadyImported, pii },
     }
   }
 

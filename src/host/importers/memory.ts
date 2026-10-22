@@ -135,6 +135,51 @@ function fromMarkdownFile(
 // ---------------------------------------------------------------------------
 // 1. Claude Code auto memory（格式与我们的最接近，价值最高）
 // ---------------------------------------------------------------------------
+
+/** 自动记忆目录扫描：frontmatter name/description/type 与 Claude Code 同格式 */
+async function scanAutoMemoryDirs(
+  dirs: string[],
+  source: ImportSourceId,
+  options: ScanOptions,
+): Promise<{ items: ImportItem[]; skipped: SkippedFile[] }> {
+  const items: ImportItem[] = []
+  const skipped: SkippedFile[] = []
+  for (const dir of dirs) {
+    for (const abs of await listFiles(dir, ['.md'])) {
+      if (path.basename(abs).toLowerCase() === 'memory.md') continue // 索引文件不是记忆本体
+      if (items.length >= options.limit) break
+      const text = await readText(abs)
+      if (!text) continue
+      const { data, body } = readFrontmatter(text)
+      if (!body.trim()) {
+        skipped.push({ origin: abs, reason: 'empty' })
+        continue
+      }
+      const kind = mapClaudeType(data.type)
+      items.push(
+        item({
+          source,
+          origin: abs,
+          index: 0,
+          title: String(data.name ?? baseNoExt(abs)),
+          summary: String(data.description ?? body),
+          body,
+          kind,
+          activation: kind === 'feedback' ? 'always' : 'on_demand',
+          tags: ['imported', ...sourceTags(source)],
+          confidence: 'medium',
+        }),
+      )
+    }
+  }
+  return { items, skipped }
+}
+
+function sourceTags(source: ImportSourceId): string[] {
+  if (source === 'qoder-memory') return ['qoder']
+  return ['claude-code']
+}
+
 const claudeCodeMemory: SourceDescriptor = {
   id: 'claude-code-memory',
   label: 'Claude Code auto memory',
@@ -143,37 +188,43 @@ const claudeCodeMemory: SourceDescriptor = {
     return (await listUserProjectDirs('memory')).filter(Boolean)
   },
   async scan(_cwd, options) {
-    const items: ImportItem[] = []
-    const skipped: SkippedFile[] = []
-    for (const dir of await listUserProjectDirs('memory')) {
-      for (const abs of await listFiles(dir, ['.md'])) {
-        if (path.basename(abs).toLowerCase() === 'memory.md') continue // 索引文件不是记忆本体
-        if (items.length >= options.limit) break
-        const text = await readText(abs)
-        if (!text) continue
-        const { data, body } = readFrontmatter(text)
-        if (!body.trim()) {
-          skipped.push({ origin: abs, reason: 'empty' })
-          continue
-        }
-        const kind = mapClaudeType(data.type)
-        items.push(
-          item({
-            source: 'claude-code-memory',
-            origin: abs,
-            index: 0,
-            title: String(data.name ?? baseNoExt(abs)),
-            summary: String(data.description ?? body),
-            body,
-            kind,
-            activation: kind === 'feedback' ? 'always' : 'on_demand',
-            tags: ['imported', 'claude-code'],
-            confidence: 'medium',
-          }),
-        )
+    return scanAutoMemoryDirs(await listUserProjectDirs('memory'), 'claude-code-memory', options)
+  },
+}
+
+// ---------------------------------------------------------------------------
+// 1b. Qoder auto memory（~/.qoder/memory 与各项目 memory/，格式同上）
+// ---------------------------------------------------------------------------
+
+/** Qoder 的全局记忆目录 + 每个项目的 memory/ 子目录 */
+async function listQoderMemoryDirs(): Promise<string[]> {
+  const dirs: string[] = []
+  const global = path.join(HOME(), '.qoder', 'memory')
+  if (await isDir(global)) dirs.push(global)
+  const projects = path.join(HOME(), '.qoder', 'projects')
+  if (await isDir(projects)) {
+    try {
+      for (const entry of await readdir(projects, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue
+        const candidate = path.join(projects, entry.name, 'memory')
+        if (await isDir(candidate)) dirs.push(candidate)
       }
+    } catch {
+      // 目录不可读就当没有
     }
-    return { items, skipped }
+  }
+  return dirs
+}
+
+const qoderMemory: SourceDescriptor = {
+  id: 'qoder-memory',
+  label: 'Qoder auto memory',
+  kind: 'memory',
+  async detect() {
+    return listQoderMemoryDirs()
+  },
+  async scan(_cwd, options) {
+    return scanAutoMemoryDirs(await listQoderMemoryDirs(), 'qoder-memory', options)
   },
 }
 
@@ -233,7 +284,12 @@ const claudeMd = instructionSource(
 const agentsMd = instructionSource(
   'agents-md',
   'AGENTS.md',
-  (cwd) => [path.join(HOME(), '.agents', 'AGENTS.md'), path.join(cwd, 'AGENTS.md'), path.join(cwd, 'AGENTS.local.md')],
+  (cwd) => [
+    path.join(HOME(), '.agents', 'AGENTS.md'),
+    path.join(HOME(), '.codex', 'AGENTS.md'),
+    path.join(cwd, 'AGENTS.md'),
+    path.join(cwd, 'AGENTS.local.md'),
+  ],
   ['agents-md'],
 )
 
@@ -447,11 +503,14 @@ const dshAutoMemory: SourceDescriptor = {
   async scan(cwd, options) {
     const items: ImportItem[] = []
     const skipped: SkippedFile[] = []
+    // 前作的默认存储根与本插件相同（~/.dsh/memory）：落在自家根里的一律跳过，否则等于自导入
+    const ownRoot = options.excludeRoot ? path.resolve(options.excludeRoot) : undefined
+    const isOwn = (abs: string): boolean => ownRoot !== undefined && path.resolve(abs).startsWith(ownRoot + path.sep)
     const files = [
       path.join(HOME(), '.dsh', 'memory', 'MEMORY.md'),
       path.join(cwd, '.dsh-memory', 'MEMORY.md'),
       ...(await listFiles(path.join(cwd, '.dsh-memory'), ['.md'], true)),
-    ]
+    ].filter((abs) => !isOwn(abs))
     for (const abs of files) {
       if (items.length >= options.limit) break
       const text = await readText(abs)
@@ -508,6 +567,7 @@ export const MEMORY_SOURCES: SourceDescriptor[] = [
   clineMemoryBank,
   copilotInstructions,
   geminiMd,
+  qoderMemory,
   dshAutoMemory,
   genericDir,
 ]
