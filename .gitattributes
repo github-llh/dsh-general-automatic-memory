@@ -1,0 +1,7 @@
+# 提交进仓库的构建产物必须三端一致：lib/ 与 client/ 永远用 LF。
+lib/** text eol=lf
+client/** text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.mjs text eol=lf
+*.d.ts text eol=lf

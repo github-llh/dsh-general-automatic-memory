@@ -32,7 +32,7 @@
     "dsh": ">=0.2.1-rc.2 <0.3.0"
   },
   "scripts": {
-    "build": "npm run build:host && npm run build:client",
+    "build": "npm run build:host && npm run build:client && node scripts/normalize-build-output.mjs",
     "build:host": "tsdown -c tsdown.config.ts",
     "build:client": "tsdown -c tsdown.client.ts && node scripts/wrap-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
