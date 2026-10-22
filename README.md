@@ -4,19 +4,19 @@
 
 一句话定位：**让任何 agent 工具都共享同一份「明文可编辑、可导入导出、可回滚恢复、自动分类分层」的长期记忆，并且为此付出的 token 成本恒定可控。**
 
-当前状态：**M0 完成 + M1 主体完成，代码可构建、测试全绿，尚未在真实 dsh 里跑过**。
+当前状态：**M0–M5 主体完成，已在真实 dsh 0.2.1-rc.2 完成冒烟（注入 / FTS5 / glob / LLM 兜底）**。
 
 ```
-typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只 require react)   tests 100/100 ✓
+typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只 require react)   tests 105/105 ✓
 ```
 
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
 | M0 骨架可加载 | ✅ | 清单、patch、client bundle 构建链（自己复刻 lazy-CJS）、locale、icon、bundle 格式校验 |
 | M1 格式 + 只读召回 | ✅ 主体 | 8 类目录、frontmatter 规范、原子写、`INDEX.md`/`PROFILE.md`/`graph.jsonl` 生成、L0 词法检索、三级注入、逐字节幂等、6 工具 + 3 命令、面板「总览/浏览」两个视图 |
-| M1 剩余 | ⚠️ | L1 SQLite FTS5 已接（`node:sqlite`，可删可重建）；剩真实 dsh 冒烟与 glob 注入的真机校准 |
+| M1 剩余 | ✅ | 真实 dsh 冒烟完成：常驻/目录注入、`memory_recall` 走 L1 FTS5、glob 激活（`tool/call.arguments` 是 JSON 字符串；slim 也保留 glob） |
 | M2 自动写入 | ✅ 主体 | 规则抽取（8 类信号 + 相对日期转绝对）、来源门控（密钥/PII/敏感话题/突增熔断）、`ADD/UPDATE/INVALIDATE/NOOP`、episode 层、`suggest` 待确认队列（15s 超时=静默 NOOP）、compaction 抢救、审计 |
-| M2 剩余 | ⚠️ | 确认卡已挂到 `conversation.input.dock`；只剩 LLM 兜底抽取的 `ctx.llm.stream` 契约待真机复核 |
+| M2 剩余 | ✅ | LLM 兜底已按真实契约核对：`provider/model` 取本会话 `model/selection`，组装 `text-delta`；真机 `llmCalls=1`，候选进入 pending（15s 静默 NOOP） |
 | M4 导入 | ✅ 主体 | 10 个记忆源（Claude Code auto memory / CLAUDE.md / AGENTS.md / Cursor / Windsurf / Cline / Copilot / Gemini / 前作 / 任意目录）+ 4 个会话源（dsh 多帧 zstd / Claude Code jsonl / 通用 jsonl / 通用 Markdown）；dry-run 预检 + 快照 + 去重预览 |
 | M4 剩余 | ✅ | 投影器（受管区块、默认关闭）+ zip 导入导出 已补齐 |
 | M5 固化恢复 | ✅ 主体 | 快照（含 sha256 manifest）、diff、回滚（回滚前自动快照）、固化（合并近义/清理低质 summary/晋升重复主题/降级冷条目/episode 过期） |
@@ -37,14 +37,14 @@ npm_config_registry=https://registry.npmjs.org dsh plugin --profile desktop add 
 
 装完重启 dsh（替换已装包需要重启才生效），侧栏会出现「记忆」图标。
 
-**升级**：git 源在 lockfile 里按 commit 锁定，重复 add 不一定重新解析 HEAD。稳妥做法是先移除再装（或用插件页的卸载/重装）：
+**升级**：第三方 Git 插件在 DSH 里**没有“更新”按钮**，官方路径是先卸载再安装。直接对已安装的包再点一次“安装”会失败：DSH 按依赖值的前后变化判断装了哪个包，同名依赖只变版本时变化为空，会报「无法从依赖变更中确定安装了哪一个包」，并回滚 `package.json` / `pnpm-lock.yaml`（node_modules 可能留下新文件，状态反而不一致）。
 
 ```bash
 dsh plugin --profile desktop remove dsh-general-automatic-memory
 dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
 ```
 
-`~/.dsh/memory` 里的数据不会动。
+用插件页操作时同理：通用自动记忆 → 卸载 → 添加插件。**安装时请把 `github:github-llh/dsh-general-automatic-memory` 作为 Git 地址填写，不要混用 `https://github.com/...`**；两种写法在 DSH 眼里不是同一个已安装依赖，会触发上面那个误判。卸载/重装都不会动 `~/.dsh/memory` 里的数据。
 
 **可选：上架到插件市场**。仓库里带了索引生成器：
 

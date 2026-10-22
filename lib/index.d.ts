@@ -85,8 +85,13 @@ interface ToolDefinition {
   name: string;
   description: string;
   parameters: Dict;
-  output?: {
+  /** dsh-tools 强制要求 render；缺了会直接拒绝注册 */
+  output: {
     schema: Dict;
+    render(args: Dict, value: unknown): Array<{
+      type: 'text';
+      text: string;
+    }>;
   };
   execute(args: Dict, exec: ToolExec): unknown | Promise<unknown>;
 }
@@ -121,7 +126,7 @@ type CommandResult = {
 interface PromptContext {
   name: string;
   order: number;
-  text: string;
+  text: string | ((context: unknown) => string);
   required?: boolean;
 }
 interface WebRoute {

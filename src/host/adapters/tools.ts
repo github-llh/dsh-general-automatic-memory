@@ -27,7 +27,11 @@ export function registerTools(ctx: HostContext, api: MemoryService, config: Memo
 const MINIMAL = ['memory_recall', 'memory_read', 'memory_status']
 const STANDARD = [...MINIMAL, 'memory_write', 'memory_forget', 'memory_graph']
 
-const OBJECT_SCHEMA = { type: 'object', additionalProperties: true } as const
+/** 所有记忆工具都返回纯文本；dsh-tools 要求显式声明 render */
+const TEXT_OUTPUT = {
+  schema: { type: 'string' },
+  render: (_args: Record<string, unknown>, value: unknown) => [{ type: 'text' as const, text: String(value ?? '') }],
+}
 
 const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDefinition> = {
   memory_recall: (api, config) => ({
@@ -45,7 +49,7 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
       required: [],
       additionalProperties: true,
     },
-    output: { schema: OBJECT_SCHEMA },
+    output: TEXT_OUTPUT,
     async execute(args) {
       const query = typeof args.query === 'string' ? args.query : ''
       if (!query.trim()) {
@@ -93,7 +97,7 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
       required: ['id'],
       additionalProperties: true,
     },
-    output: { schema: OBJECT_SCHEMA },
+    output: TEXT_OUTPUT,
     async execute(args) {
       const id = String(args.id ?? '')
       const entry = await api.read(id)
@@ -118,7 +122,7 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
     name: 'memory_status',
     description: 'Read-only diagnostics: where memory lives, how many entries, injection budget usage, alerts.',
     parameters: { type: 'object', properties: {}, required: [], additionalProperties: true },
-    output: { schema: OBJECT_SCHEMA },
+    output: TEXT_OUTPUT,
     async execute() {
       const s = await api.stats()
       const kinds = Object.entries(s.byKind)
@@ -159,7 +163,7 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
       required: ['title', 'summary', 'content', 'kind'],
       additionalProperties: true,
     },
-    output: { schema: OBJECT_SCHEMA },
+    output: TEXT_OUTPUT,
     async execute(args) {
       const kind = String(args.kind ?? '')
       const title = String(args.title ?? '').trim()
@@ -214,7 +218,7 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
       required: ['id', 'reason'],
       additionalProperties: true,
     },
-    output: { schema: OBJECT_SCHEMA },
+    output: TEXT_OUTPUT,
     async execute(args) {
       const id = String(args.id ?? '')
       const reason = String(args.reason ?? '')
@@ -241,7 +245,7 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
       required: [],
       additionalProperties: true,
     },
-    output: { schema: OBJECT_SCHEMA },
+    output: TEXT_OUTPUT,
     async execute(args) {
       const limit = typeof args.limit === 'number' ? Math.min(args.limit, 20) : 10
       const needle = String(args.entity ?? args.id ?? '').trim()

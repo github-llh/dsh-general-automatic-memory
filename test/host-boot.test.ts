@@ -11,7 +11,7 @@ import type { MemoryConfig } from '../src/host/model.js'
 interface FakeState {
   tools: Array<{ name: string }>
   commands: Array<{ name: string }>
-  contexts: Array<{ name: string; text: string }>
+  contexts: Array<{ name: string; text: string | ((context: unknown) => string) }>
   routes: Array<{ path: string; handler: (req: unknown, res: unknown) => Promise<void> | void }>
   listeners: Map<string, Array<(...args: unknown[]) => unknown>>
   provided: Record<string, unknown>
@@ -56,7 +56,9 @@ function makeCtx() {
       return () => {}
     },
     tools: {
-      register: (definition: { name: string }) => {
+      register: (definition: { name: string; output?: { render?: unknown } }) => {
+        // 与 dsh-tools 的真实校验一致：缺 render 会拒绝注册
+        if (typeof definition.output?.render !== 'function') throw new Error(`tool ${definition.name} missing output.render`)
         state.tools.push(definition)
         return () => {}
       },
@@ -161,8 +163,9 @@ describe('插件装配（对构建产物 lib/index.js）', () => {
     expect(state.routes.map((r) => r.path)).toContain('/general-memory/entries')
     expect(state.listeners.get('agent/pre-step')).toHaveLength(1)
     expect(state.listeners.get('session/event')?.length ?? 0).toBeGreaterThanOrEqual(2) // inject + ingest 各一个监听器
-    // 记忆为空时不该注册常驻层（空 section 也占前缀）
-    expect(state.contexts).toHaveLength(0)
+    // 记忆为空时不该注册常驻层（空 section 也占前缀）；目录 context 是动态的，可以空
+    expect(state.contexts.filter((c) => c.name === 'general-memory')).toHaveLength(0)
+    expect(state.contexts.some((c) => c.name === 'general-memory-catalog')).toBe(true)
   })
 
   it('activates even when every optional dsh service is absent', async () => {
@@ -190,79 +193,81 @@ describe('插件装配（对构建产物 lib/index.js）', () => {
       source: 'user-stated',
       activation: 'always',
     })
-    expect(state.contexts.length).toBeGreaterThan(0)
-    const last = state.contexts[state.contexts.length - 1]!
-    expect(last.name).toBe('general-memory')
-    expect(last.text).toContain('改完代码后不要加总结')
+    const always = state.contexts.find((c) => c.name === 'general-memory')
+    expect(always).toBeDefined()
+    expect(always!.text).toContain('改完代码后不要加总结')
   })
 
   it('does not re-register the context when nothing changed (prefix-cache stability)', async () => {
     const { state, api } = await boot()
     await api.create({ kind: 'persona', title: '后端出身', summary: '十年 Go', body: 'b', source: 'user-stated', activation: 'always' })
-    const countAfterCreate = state.contexts.length
+    const countAfterCreate = state.contexts.filter((c) => c.name === 'general-memory').length
     // 再写一条 on_demand 的条目：常驻层内容没变，就不该动 system prompt
     await api.create({ kind: 'reference', title: '看板地址', summary: 'grafana 内网', body: 'b', source: 'user-stated', activation: 'on_demand' })
-    expect(state.contexts.length).toBe(countAfterCreate)
+    expect(state.contexts.filter((c) => c.name === 'general-memory')).toHaveLength(countAfterCreate)
   })
 })
 
-describe('注入管线（agent/pre-step waterfall）', () => {
+describe('注入管线（agent/pre-step + 动态目录 context）', () => {
   const baseMessages = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]
 
-  function preStep(state: FakeState, sessionId: string) {
+  function preStep(state: FakeState, sessionId: string, cwd = '/repo/demo') {
     const decision = {
       messages: [...baseMessages],
-      session: { id: sessionId, cwd: '/repo/demo' },
+      agent: { session: { id: sessionId, cwd } },
       startsRequestSeries: true,
     }
     const listener = state.listeners.get('agent/pre-step')![0]!
-    return listener(decision, () => decision) as typeof decision
+    return listener(decision, () => decision) as Promise<typeof decision>
+  }
+
+  function catalogText(state: FakeState, sessionId: string, cwd = '/repo/demo'): string {
+    const context = state.contexts.find((c) => c.name === 'general-memory-catalog')
+    if (typeof context?.text === 'function') return context.text({ agent: { session: { id: sessionId, cwd } } })
+    return context?.text ?? ''
   }
 
   it('injects nothing when memory is empty, and leaves the decision untouched', async () => {
     const { state } = await boot()
-    const out = preStep(state, 's-empty')
+    const out = await preStep(state, 's-empty')
     expect(out.messages).toHaveLength(1)
     expect(out.startsRequestSeries).toBe(true)
+    expect(catalogText(state, 's-empty')).toBe('')
   })
 
-  it('spreads the decision so startsRequestSeries survives the rewrite', async () => {
+  it('publishes the catalog through a dynamic context without rewriting the decision', async () => {
     const { state, api } = await boot()
-    await api.create({ kind: 'feedback', title: '别加总结', summary: '用户自己读 diff', body: 'b', source: 'user-stated', activation: 'always' })
-    const out = preStep(state, 's-spread')
-    expect(out.messages.length).toBeGreaterThan(1)
+    await api.create({ kind: 'reference', title: '看板地址', summary: 'grafana 内网', body: 'b', source: 'user-stated' })
+    const out = await preStep(state, 's-catalog')
+    expect(out.messages).toHaveLength(1)
     expect(out.startsRequestSeries).toBe(true)
-    const injected = out.messages[out.messages.length - 1] as unknown as { role: string; source: { kind: string }; content: Array<{ text: string }> }
-    expect(injected.role).toBe('user')
-    expect(injected.source.kind).toBe('general-memory')
-    expect(injected.content[0]!.text.length).toBeGreaterThan(0)
+    expect(catalogText(state, 's-catalog')).toContain('看板地址')
   })
 
-  it('injects byte-identical text when a human is present on every turn', async () => {
+  it('emits byte-identical catalog text when a human is present on every turn', async () => {
     const { state, api } = await boot()
     await api.create({ kind: 'feedback', title: '别加总结', summary: '用户自己读 diff', body: 'b', source: 'user-stated', activation: 'always' })
-    await api.create({ kind: 'project', title: '鉴权中间件重写', summary: 'cookie 存 session token', body: 'b', source: 'user-stated', scope: 'project', project: 'demo' })
+    await api.create({ kind: 'reference', title: '鉴权中间件重写', summary: 'cookie 存 session token', body: 'b', source: 'user-stated' })
 
     const sessionEvent = state.listeners.get('session/event')![0]!
     const texts: string[] = []
     for (let i = 0; i < 5; i++) {
       sessionEvent({ id: 's-human' }, { type: 'user/message', data: { source: { kind: 'user' } } })
-      const out = preStep(state, 's-human')
-      const last = out.messages[out.messages.length - 1] as unknown as { content: Array<{ text: string }> }
-      texts.push(last.content[0]!.text)
+      await preStep(state, 's-human')
+      texts.push(catalogText(state, 's-human'))
     }
+    expect(texts.some((text) => text.includes('鉴权中间件重写'))).toBe(true)
     expect(new Set(texts).size).toBe(1)
   })
 
   it('returns the decision unchanged when the waterfall shape is unexpected (never undefined)', async () => {
-    const { state, api } = await boot()
-    await api.create({ kind: 'feedback', title: 'x', summary: 'y', body: 'b', source: 'user-stated', activation: 'always' })
+    const { state } = await boot()
     const listener = state.listeners.get('agent/pre-step')![0]!
     // 没有 next、decision 不是对象：必须恒等返回，绝不能返回 undefined 冲掉 agent 的决策链
-    expect(listener('not-an-object', undefined)).toBe('not-an-object')
-    expect(listener(undefined, undefined)).toBe(undefined)
-    const noMessages = { session: { id: 'x' } }
-    expect(listener(noMessages, () => noMessages)).toBe(noMessages)
+    await expect(listener('not-an-object', undefined)).resolves.toBe('not-an-object')
+    await expect(listener(undefined, undefined)).resolves.toBe(undefined)
+    const noMessages = { agent: { session: { id: 'x', cwd: '/repo' } } }
+    await expect(listener(noMessages, () => noMessages)).resolves.toBe(noMessages)
   })
 })
 

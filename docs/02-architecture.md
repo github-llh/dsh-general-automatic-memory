@@ -57,7 +57,7 @@ dsh 插件在物理上必须分成两个独立的模块，分别运行在两个 
 ### 3.1 召回（读路径，每个模型请求）
 
 ```
-agent/pre-step (waterfall)
+agent/pre-step (async waterfall)
    │
    ├─ recall.snapshot(session, turn) ─────────────────────────────┐
    │     1. 计算指纹 fp = hash(常驻层内容, 目录层内容, 项目 slug, 触发 glob)
@@ -69,12 +69,17 @@ agent/pre-step (waterfall)
    │     4. 预算超限 → 按 (kind 优先级 × heat × 相关度) 裁剪，被裁候选写审计
    │     5. 分层节流：fullEvery(20) / slimEvery(8) / humanPresent → 无条件完整
    │
-   └─ return { ...decision, messages }     ← 必须 spread，否则 startsRequestSeries 等字段丢失
+   ├─ 快照写入 per-session map
+   └─ return decision（不改 messages）
+        ↓
+   dynamic ctx.systemPrompt.context({ name:'general-memory-catalog', text: ctx => … })
+        ↓
+   dsh runtime-context 消息（source.kind='runtime-context'，新快照 supersede 旧快照）
 ```
 
 常驻层走 `ctx.systemPrompt.context({ name, order, text, required })` 而**不是** `section()`：`context()` 是 cache-safe 的（仅在内容变化或 compaction 移除后追加一条 durable 快照），`section()` 改动会触发 system prompt 面替换，直接击穿前缀缓存。
 
-动态快照走 `agent/pre-step` 的 waterfall 改写，**不落盘为新 session 事件**（不膨胀会话日志）。
+动态快照由 `agent/pre-step` 计算、由动态 `ctx.systemPrompt.context` 投递；dsh 用 runtime-context 快照承载它，不追加普通用户消息，也不膨胀会话历史。
 
 ### 3.2 写入（写路径）
 

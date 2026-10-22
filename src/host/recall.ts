@@ -155,7 +155,8 @@ export function renderSnapshot(input: SnapshotInput): SnapshotResult {
       ? { text: '', shown: 0, omitted: 0 }
       : renderCatalogLayer(input.entries, input.budget.catalogChars, input.project)
 
-  const glob = input.mode === 'slim' ? '' : renderGlobLayer(input.globMatches ?? [], input.budget.globChars)
+  // glob 命中是当前文件直接相关的，slim 也不能丢；目录层才做节流
+  const glob = renderGlobLayer(input.globMatches ?? [], input.budget.globChars)
 
   const parts = [always, catalog.text, glob].filter((p) => p.length > 0)
   const text = parts.length > 0 ? parts.join('\n') : ''

@@ -45,11 +45,15 @@ ChatGPT 走的是另一条路——**没有向量库、没有知识图谱、没�
 │      ↑ cache-safe：仅在内容变化或 compaction 移除后追加一条 durable 快照
 │      ✗ 绝不用 section()：改动会触发 system prompt 面替换 → 击穿前缀缓存
 │
-├── 动态层：ctx.on('agent/pre-step', waterfall)
-│      1. 不拥有决策时 return next()
-│      2. 改写时 spread：return { ...decision, messages }   ← 否则 startsRequestSeries 等字段丢失
-│      3. 注入形式：一条 user-role 消息（dsh 落盘记为 agent/inbox/spliced）
-│      4. 不落盘为新 session 事件类型（会导致 Session 拒绝重开）
+├── 动态层：ctx.on('agent/pre-step', async waterfall)
+│      1. 不拥有决策时 return await next()（真实 waterfall 是异步的）
+│      2. pre-step 只计算目录/glob 快照，不改写 messages
+│         —— dsh 会把决策里的普通消息当用户消息落盘，不能拿它做每轮注入
+│      3. 快照按会话写入内存 map
+│      4. 动态 ctx.systemPrompt.context({ name:'general-memory-catalog', text: ctx => … })
+│         由 dsh 的 runtime-context 消息投递（source.kind='runtime-context'）
+│         新快照会 supersede 旧快照，不膨胀普通用户历史
+│      5. 会话身份取 incoming.agent.session.id（next() 的 fallback 决策不含 agent）
 │
 └── 按需层：模型调 memory_recall / memory_read / memory_graph
        + glob 命中自动注入（activation: glob 且 globs 匹配当前编辑路径）
@@ -132,7 +136,7 @@ function renderSnapshot(input: SnapshotInput): string {
 |---|---|---|---|
 | `cold` | 数据未就绪（首次启动、索引重建中） | 精简版（只有常驻层 + 一行"目录构建中"） | — |
 | `full` | 距上次完整版 ≥N 个模型请求 | 常驻层 + 完整目录层 | `throttle.fullEvery = 20` |
-| `slim` | 距上次投递 <M 个请求 | 只常驻层 | `throttle.slimEvery = 8` |
+| `slim` | 距上次投递 <M 个请求 | 常驻层 + glob 命中（目录层省略） | `throttle.slimEvery = 8` |
 | `human` | 检测到真人输入（`user/message` 的 `source.kind === 'user'`） | **无条件完整版** | — |
 | `verbatim` | 指纹未变 | 原样复读 | — |
 

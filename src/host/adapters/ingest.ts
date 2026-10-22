@@ -24,6 +24,8 @@ export function registerIngest(ctx: HostContext, ingestor: Ingestor, config: Mem
   if (typeof ctx.on !== 'function') return () => {}
   const disposers: Array<() => void> = []
   const buffers = new Map<string, SessionBuffer>()
+  /** 本会话实际使用的模型；LLM 兜底抽取必须跟着会话走，不能猜默认值 */
+  const sessionModels = new Map<string, { provider: string; model: string }>()
 
   const bufferOf = (key: string): SessionBuffer => {
     let buffer = buffers.get(key)
@@ -38,12 +40,14 @@ export function registerIngest(ctx: HostContext, ingestor: Ingestor, config: Mem
     const buffer = buffers.get(key)
     if (!buffer || buffer.users.length === 0) return
     const snapshot = { ...buffer, users: [...buffer.users], assistants: [...buffer.assistants] }
+    const model = sessionModels.get(key)
     buffers.set(key, { turn: buffer.turn + 1, users: [], assistants: [], ...(buffer.cwd ? { cwd: buffer.cwd } : {}) })
     try {
       const result = await ingestor.ingestTurn({
         sid: key,
         turn: snapshot.turn,
         ...(snapshot.cwd ? { cwd: snapshot.cwd } : {}),
+        ...(model ? { model } : {}),
         userMessages: snapshot.users,
         assistantMessages: snapshot.assistants,
       })
@@ -61,6 +65,17 @@ export function registerIngest(ctx: HostContext, ingestor: Ingestor, config: Mem
       const type = event?.type ?? ''
       const data = (event?.data ?? {}) as Record<string, unknown>
 
+      if (type === 'model/selection' || type === 'request/header') {
+        const config = type === 'model/selection'
+          ? data
+          : (data.header as { config?: { provider?: unknown; model?: unknown } } | undefined)?.config
+        const provider = config?.provider
+        const model = config?.model
+        if (typeof provider === 'string' && provider && typeof model === 'string' && model) {
+          sessionModels.set(key, { provider, model })
+        }
+        return
+      }
       if (type === 'turn/start') {
         const buffer = bufferOf(key)
         buffer.turn = typeof data.turn === 'number' ? data.turn : buffer.turn + 1

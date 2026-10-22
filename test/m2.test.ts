@@ -8,6 +8,7 @@ import { MemoryService } from '../src/host/api.js'
 import { Ingestor } from '../src/host/ingest/index.js'
 import { decide } from '../src/host/ingest/decide.js'
 import { extractFromTurn, normalizeDates } from '../src/host/ingest/extract.js'
+import { extractWithLlm } from '../src/host/ingest/llm-extract.js'
 import { gateCandidate } from '../src/host/ingest/gate.js'
 import { ImportService } from '../src/host/importers/index.js'
 import { decompressZstdFrames, parseDshSession, parseGenericJsonl } from '../src/host/importers/conversation.js'
@@ -67,6 +68,79 @@ describe('规则抽取', () => {
 
   it('extracts nothing from small talk', () => {
     expect(extractFromTurn({ userMessages: ['这个函数叫什么名字'], now: NOW })).toEqual([])
+  })
+})
+
+describe('LLM 兜底抽取（真实 ctx.llm.stream 契约）', () => {
+  const output = [{
+    kind: 'project',
+    title: '内部代号',
+    summary: '长期代号 ZQ-4721',
+    body: '内部代号是 ZQ-4721。',
+    evidence: '内部项目 codename 是 ZQ-4721',
+    confidence: 'high',
+  }]
+  const transcript = '用户说明：内部项目 codename 是 ZQ-4721，这个代号以后长期有效。' + '补充上下文。'.repeat(20)
+
+  function fakeCtx(options: {
+    selection?: { provider?: string; model?: string }
+    chunks?: Array<{ type?: string; text?: string; kind?: string }>
+  } = {}) {
+    const calls: Array<Record<string, unknown>> = []
+    const ctx = {
+      get(name: string) {
+        if (name === 'llm') {
+          return {
+            stream: async function* (request: Record<string, unknown>) {
+              calls.push(request)
+              for (const chunk of options.chunks ?? [
+                { type: 'text-delta', text: JSON.stringify(output) },
+                { type: 'finish', kind: 'stop' },
+              ]) {
+                yield chunk
+              }
+            },
+          }
+        }
+        if (name === 'agentDefaultModel') return { currentSelection: () => options.selection }
+        return undefined
+      },
+      logger: { warn: () => {} },
+    }
+    return { ctx: ctx as never, calls }
+  }
+
+  it('uses the session model and assembles text-delta chunks', async () => {
+    const { ctx, calls } = fakeCtx({ selection: { provider: 'default-p', model: 'default-m' } })
+    const result = await extractWithLlm(ctx, transcript, async () => true, { provider: 'session-p', model: 'session-m' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.provider).toBe('session-p')
+    expect(calls[0]!.model).toBe('session-m')
+    const messages = calls[0]!.messages as Array<{ role: string; content: Array<{ text: string }> }>
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.role).toBe('user')
+    expect(messages[0]!.content[0]!.text).toContain('ZQ-4721')
+    expect(result).toHaveLength(1)
+    expect(result[0]!.source).toBe('model-inferred')
+  })
+
+  it('falls back to agentDefaultModel and returns [] on a failed stream', async () => {
+    const fallback = fakeCtx({
+      selection: { provider: 'default-p', model: 'default-m' },
+      chunks: [
+        { type: 'text-delta', text: JSON.stringify(output) },
+        { type: 'finish', kind: 'error' },
+      ],
+    })
+    expect(await extractWithLlm(fallback.ctx, transcript, async () => true)).toEqual([])
+    expect(fallback.calls[0]!.provider).toBe('default-p')
+    expect(fallback.calls[0]!.model).toBe('default-m')
+  })
+
+  it('does nothing when no target model is available', async () => {
+    const { ctx, calls } = fakeCtx()
+    expect(await extractWithLlm(ctx, transcript, async () => true)).toEqual([])
+    expect(calls).toHaveLength(0)
   })
 })
 

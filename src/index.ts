@@ -39,16 +39,24 @@ export function apply(ctx: HostContext, config: MemoryConfig): void {
         const importer = new ImportService(api, ingestor, merged)
         // 注册期能力不能在 apply 时假设服务已就绪：用 inject 等待；
         // 每个 scoped 注册项随子 fiber 自动回收，不重复放进外层 disposers。
+        const attempt = (label: string, fn: () => void): void => {
+          try {
+            fn()
+          } catch (cause) {
+            // 注册失败曾因为 dsh-tools 要求 output.render 而被静默吞掉
+            ctx.logger?.warn?.(`[general-memory] ${label} registration failed: ${(cause as Error).message}`)
+          }
+        }
         ctx.inject(['tools'], (scoped) => {
-          registerTools(scoped, api, merged)
+          attempt('tools', () => registerTools(scoped, api, merged))
         })
         ctx.inject(['commands'], (scoped) => {
-          registerCommands(scoped, api)
+          attempt('commands', () => registerCommands(scoped, api))
         })
         ctx.inject(['webServer'], (scoped) => {
-          registerHttp(scoped, api, nonce)
-          registerNonceRoute(scoped, nonce)
-          registerFeatures(scoped, nonce, { api, ingestor, importer })
+          attempt('http', () => registerHttp(scoped, api, nonce))
+          attempt('nonce', () => registerNonceRoute(scoped, nonce))
+          attempt('features', () => registerFeatures(scoped, nonce, { api, ingestor, importer }))
         })
         // 目录层只依赖核心事件，不能因为 systemPrompt 缺席而一起失效
         disposers.push(registerInjection(ctx, api, merged), registerIngest(ctx, ingestor, merged))

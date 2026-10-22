@@ -64,6 +64,25 @@ describe('glob 匹配', () => {
     expect(paths.sort()).toEqual(['/repo/a.ts', '/repo/b.ts'])
     expect(extractTouchedPaths({ type: 'tool/call', data: { args: { cmd: 'ls -la' } } })).toEqual([])
   })
+
+  it('parses the real tool/call JSON-string arguments, including relative paths', () => {
+    const paths = extractTouchedPaths({
+      type: 'tool/call',
+      data: {
+        name: 'read',
+        callId: 'call_1',
+        arguments: JSON.stringify({ path: 'src/a.ts', nested: { file_path: '/repo/b.ts' } }),
+      },
+    })
+    expect(paths.sort()).toEqual(['/repo/b.ts', 'src/a.ts'])
+    // bash 的 arguments 也是 JSON 字符串，但它只有 command，不能误收
+    expect(
+      extractTouchedPaths({
+        type: 'tool/call',
+        data: { name: 'bash', arguments: JSON.stringify({ command: 'cat /etc/passwd' }) },
+      }),
+    ).toEqual([])
+  })
 })
 
 describe('store', () => {

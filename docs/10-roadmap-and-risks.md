@@ -10,7 +10,7 @@
 |---|---|
 | 交付 | `package.json`（含 `dsh.bundle.patch` + `dsh.client`）、`cordis.patch.yml`、Host `apply`、client bundle 构建链（自复刻 tsdown preset + `scripts/wrap-client.mjs`）、`locale/{en,zh}.json`、`icon.svg`、`scripts/verify-bundle.mjs` |
 | 验收 | ✅ client bundle 首行与 `id === 包名` 断言通过；✅ `node:vm` 沙箱真跑产物（`test/bundle.test.ts`）；✅ 只 `require("react")`；✅ `sidebar.panellist` 与 `main` 的 id/key 配对 |
-| 未完成 | ⬜ 在真实 `dsh web --patch` 里点亮侧栏图标（需要一次真机冒烟） |
+| 未完成 | ✅ 真实 Desktop 冒烟：侧栏「记忆」图标与 8 视图面板已加载 |
 | 关键风险 | **官方 client bundle preset 未发布成包**，必须自己复刻 lazy-CJS 输出格式 → M0 的唯一目标就是打通它。**已打通**：tsdown 出 `.cjs`，wrap 脚本套壳，产物与本机 `dsh-plugin@2.0.5` 的 `client/client.js` 结构逐字对齐 |
 
 ### M1 · 记忆格式 + 只读召回（2 周）— ✅ 主体完成
@@ -18,15 +18,15 @@
 | 项 | 内容 |
 |---|---|
 | 交付 | `store`（frontmatter 解析/校验、单调 ULID、原子写、checksum、路径白名单）、8 类目录布局、`INDEX.md`/`PROFILE.md`/`graph.jsonl` 生成器（内容哈希门控，没变不写）、L0 词法检索（CJK 单字+双字，BM25 简化）、三档注入（`systemPrompt.context` + `agent/pre-step`）、**逐字节幂等快照 + 分层节流**、6 个工具、3 个 slash 命令、审计流水、面板「总览/浏览」两视图 + 6 条 HTTP 路由 |
-| 验收 | ✅ 契约测试：同输入渲染 100 次字节一致、条目顺序打乱输出不变；✅ 注入文本无时刻/相对时间/uuid；✅ 目录层超限自动裁剪并留 `+N more` 尾行；✅ 预算占比可测；✅ 63 个测试全绿 |
-| 未完成 | ⬜ L1 SQLite FTS5（现为纯 TS 词法检索，规模上千条后需要）；⬜ glob 注入依赖 `tool/call` 事件的 payload 形状，需真机校准；⬜ `ctx.tokenMeter` 占比是实测还是估算需真机确认 |
+| 验收 | ✅ 契约测试：同输入渲染 100 次字节一致、条目顺序打乱输出不变；✅ 注入文本无时刻/相对时间/uuid；✅ 目录层超限自动裁剪并留 `+N more` 尾行；✅ 预算占比可测；✅ 105 个测试全绿 |
+| 未完成 | ✅ L1 FTS5 真机 `memory_recall`（hits=3）；✅ glob 激活校准（`tool/call.arguments` 是 JSON 字符串；slim 也保留 glob）；⬜ `ctx.tokenMeter` 占比在 pre-step 仍可能取不到 session（只影响面板水位，不影响注入） |
 | 说明 | 此阶段**没有自动写入**，全靠手工、命令与 `memory_write` 工具。这是刻意的：先证明"明文可编辑 + 恒定预算召回"这条主干成立 |
 
 ### M2 · 自动写入 + 审计（2 周）— ✅ 主体完成
 
 已实现：`episode` 层（jsonl + 单日 FIFO 上限 + 过期归档）、规则抽取（显式指令/纠正/确认/身份/决策/关系三元组/外部指向/相对日期归一）、门控（密钥硬拒 / 敏感话题默认不记 / PII 标记不可共享 / 突增熔断 / 证据强制）、`ADD/UPDATE/INVALIDATE/NOOP` 决策（用户条目永不被自动条目覆盖）、`suggest` 待确认队列（15s → 静默 NOOP）、compaction 前抢救、全量审计。
 
-未完成：LLM 兜底抽取的 `ctx.llm.stream` 契约需真机复核；确认卡组件尚未挂到 `conversation.input.dock`（HTTP 接口与队列已就绪）。
+已完成：LLM 兜底抽取按真实 `ctx.llm.stream` 契约验证（`provider/model` 取本会话 `model/selection`，`text-delta` 组装；真机 `llmCalls=1`，候选进入 pending 后 15s 静默 NOOP）；确认卡已挂到 `conversation.input.dock`。
 
 | 项 | 内容 |
 |---|---|

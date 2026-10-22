@@ -23,6 +23,8 @@ export function registerInjection(ctx: HostContext, api: MemoryService, config: 
   // --- 常驻层 -------------------------------------------------------------
   let alwaysText = ''
   let alwaysDispose: (() => void) | null = null
+  /** 每个会话的目录层文本；由 pre-step 计算，由动态 context 读取 */
+  const catalogBySession = new Map<string, string>()
   // 注册期能力不能在 apply 时假设服务已就绪；等 systemPrompt 激活后再接常驻层。
   // 目录层（agent/pre-step）只依赖核心事件，不跟着一起等。
   let systemPrompt: HostContext['systemPrompt']
@@ -46,6 +48,12 @@ export function registerInjection(ctx: HostContext, api: MemoryService, config: 
 
   ctx.inject(['systemPrompt'], (scoped) => {
     systemPrompt = scoped.get('systemPrompt') as HostContext['systemPrompt']
+    systemPrompt?.context({
+      name: 'general-memory-catalog',
+      order: 901,
+      text: (context) => catalogBySession.get(agentSessionKey((context as { agent?: unknown })?.agent)) ?? '',
+      required: false,
+    })
     syncAlwaysLayer()
   })
 
@@ -75,37 +83,44 @@ export function registerInjection(ctx: HostContext, api: MemoryService, config: 
   // --- 目录层：agent/pre-step waterfall -----------------------------------
   if (typeof ctx.on === 'function') {
     disposers.push(
-      ctx.on('agent/pre-step', ((...args: unknown[]) => {
+      ctx.on('agent/pre-step', (async (...args: unknown[]) => {
         // waterfall 契约：不拥有决策时必须 return next()；改写时必须 spread，
         // 否则 startsRequestSeries 之类的字段会丢。
+        // ⚠️ 真机是**异步** waterfall：next() 返回 Promise，必须 await，
+        //    否则会把 Promise 当决策直接透传，注入被静默跳过。
         // ⚠️ 形状与预期不符时**恒等返回**——返回 undefined 会把 agent 的决策链冲掉，
         //    那比「这一轮没注入记忆」严重得多。
         const incoming = args[0]
         const next = args[1]
-        const decision = typeof next === 'function' ? (next as () => unknown)() : incoming
+        const decision = typeof next === 'function' ? await (next as () => unknown)() : incoming
         if (!decision || typeof decision !== 'object') return decision
 
         const messages = (decision as { messages?: unknown }).messages
         if (!Array.isArray(messages)) return decision
 
-        const key = sessionKeyOf((decision as { session?: unknown }).session)
+        // next() 返回的是 fallback 决策（不含 agent）；会话身份从 incoming payload 取
+        const payload = (incoming ?? decision) as { agent?: unknown }
+        const key = agentSessionKey(payload.agent)
         const humanPresent = humanPending.has(key)
         humanPending.delete(key)
 
         const throttle = api.throttleFor(key)
         const mode = throttle.next({ ready: api.ready, humanPresent })
-        const globMatches = globMatchesFor(api, decision, touched.get(key) ?? [])
-        const snapshot = api.snapshotFor(key, { mode, project: projectOf(decision), globMatches })
-        if (snapshot.text.length === 0) return decision
+        const globMatches = globMatchesFor(api, payload, touched.get(key) ?? [])
+        const snapshot = api.snapshotFor(key, { mode, project: projectOf(payload), globMatches })
+
+        // 常驻层单独走 systemPrompt.context；这里只保留目录/glob，
+        // 通过动态 context 由 dsh 的 runtime-context 消息投递，不写进会话历史。
+        const catalog = snapshot.chars.always > 0
+          ? snapshot.text.slice(snapshot.chars.always).replace(/^\n+/, '')
+          : snapshot.text
+        if (catalog.length > 0) catalogBySession.set(key, catalog)
+        else catalogBySession.delete(key)
 
         // 注入占比遥测（面板预算水位的数据源）
-        const total = measureTotal(ctx, decision)
+        const total = measureTotal(ctx, payload)
         if (total > 0) api.setRequestShare(snapshot.tokens / total)
-
-        return {
-          ...(decision as object),
-          messages: [...messages, { role: 'user', content: [{ type: 'text', text: snapshot.text }], source: { kind: 'general-memory' } }],
-        }
+        return decision
       }) as never) as () => void,
     )
   }
@@ -138,6 +153,20 @@ function sessionKeyOf(session: unknown): string {
   return 'default'
 }
 
+/** pre-step 的 payload 带 agent，不是 session；两者用同一个 session id 关联 */
+function agentSessionKey(agent: unknown): string {
+  if (agent && typeof agent === 'object') {
+    const session = (agent as { session?: unknown }).session
+    if (session && typeof session === 'object') {
+      const id = (session as { id?: unknown }).id
+      if (typeof id === 'string') return id
+    }
+    const id = (agent as { id?: unknown }).id
+    if (typeof id === 'string') return id
+  }
+  return 'default'
+}
+
 /** 会话 cwd → 项目 slug，用于把 project 作用域的记忆纳入目录层 */
 function projectOf(decision: unknown): string | undefined {
   const cwd = cwdOf(decision)
@@ -149,6 +178,9 @@ function cwdOf(decision: unknown): string | undefined {
     (decision as { session?: { cwd?: unknown } })?.session?.cwd,
     (decision as { cwd?: unknown })?.cwd,
     (decision as { agent?: { cwd?: unknown } })?.agent?.cwd,
+    (decision as { agent?: { session?: { cwd?: unknown } } })?.agent?.session?.cwd,
+    (decision as { agent?: { session?: { header?: { cwd?: unknown } } } })?.agent?.session?.header?.cwd,
+    (decision as { agent?: { options?: { cwd?: unknown } } })?.agent?.options?.cwd,
   ]
   for (const candidate of candidates) if (typeof candidate === 'string' && candidate.startsWith('/')) return candidate
   return undefined
@@ -188,16 +220,28 @@ export function matchGlob(pattern: string, target: string, cwd?: string): boolea
 
 /**
  * 从 tool/call 事件里捞出文件路径参数。
- * 只认「键名像路径 + 值是以 / 开头的绝对路径」的组合 —— 既不误收命令串，
- * 也不需要知道各家工具的确切 payload 形状。
+ *
+ * 真实 dsh 的 tool/call 是 `{ data: { name, arguments: "<json string>" } }`，
+ * 且 path 可能是相对 cwd 的。只认「键名像路径」的值，避免把 bash 命令串当文件。
  */
 export function extractTouchedPaths(event: { type?: string; data?: unknown }): string[] {
-  const out: string[] = []
-  const PATH_KEY = /^(file_path|filePath|path|target|notebook_path)$/
+  const out = new Set<string>()
+  const PATH_KEY = /^(file_path|filePath|path|target|notebook_path|directory|dir|cwd|workspace|root)$/
   const walk = (value: unknown, key: string | undefined, depth: number): void => {
-    if (depth > 5 || value === null || value === undefined) return
+    if (depth > 6 || value === null || value === undefined) return
     if (typeof value === 'string') {
-      if (key !== undefined && PATH_KEY.test(key) && value.startsWith('/') && value.length < 4096) out.push(value)
+      // 工具的 arguments 是 JSON 字符串，必须先展开再按子键识别
+      if (key === 'arguments' || key === 'args') {
+        try {
+          walk(JSON.parse(value) as unknown, undefined, depth + 1)
+        } catch {
+          // 非 JSON（例如 bash 命令串）就放弃，fail-safe
+        }
+        return
+      }
+      if (key !== undefined && PATH_KEY.test(key) && value.length < 4096 && !value.includes('://')) {
+        out.add(value)
+      }
       return
     }
     if (Array.isArray(value)) {
@@ -211,7 +255,7 @@ export function extractTouchedPaths(event: { type?: string; data?: unknown }): s
     }
   }
   walk(event.data, undefined, 0)
-  return out
+  return [...out]
 }
 
 function measureTotal(ctx: HostContext, decision: unknown): number {

@@ -96,12 +96,26 @@ describe('预算与裁剪', () => {
     expect(text).toContain(`+${omitted} more via memory_recall`)
   })
 
-  it('drops slim mode down to the always layer only', () => {
+  it('drops the catalog in slim mode but keeps always entries', () => {
     const list = entries(20)
     const full = renderSnapshot({ entries: list, mode: 'full', budget: BUDGET, ready: true })
     const slim = renderSnapshot({ entries: list, mode: 'slim', budget: BUDGET, ready: true })
     expect(slim.chars.catalog).toBe(0)
     expect(slim.text.length).toBeLessThan(full.text.length)
+  })
+
+  it('keeps file-triggered glob memories in slim mode', () => {
+    const glob = entry({
+      id: 'm_00000000000000000000000077',
+      kind: 'reference',
+      title: 'AGENTS 提示',
+      summary: '灰度开关代号 KX-88',
+      activation: 'glob',
+      globs: ['**/AGENTS.md'],
+    })
+    const slim = renderSnapshot({ entries: [glob], mode: 'slim', budget: BUDGET, ready: true, globMatches: [glob] })
+    expect(slim.chars.glob).toBeGreaterThan(0)
+    expect(slim.text).toContain('KX-88')
   })
 
   it('renders a cold-start placeholder instead of an empty injection', () => {

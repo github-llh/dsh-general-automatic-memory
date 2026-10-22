@@ -17,6 +17,8 @@ export interface TurnInput {
   sid: string
   turn: number
   cwd?: string
+  /** 本会话最近一次 model/selection；LLM 兜底抽取用它，避免落到无凭据的默认模型 */
+  model?: { provider: string; model: string }
   userMessages: string[]
   assistantMessages: unknown[]
   now?: Date
@@ -98,7 +100,12 @@ export class Ingestor {
     // 3) 抽取：规则优先，一个都没抽到才考虑 LLM
     let candidates = extractFromTurn({ userMessages: input.userMessages, now })
     if (candidates.length === 0 && this.config.ingest.llmExtract && this.ctx) {
-      candidates = await extractWithLlm(this.ctx, input.userMessages.join('\n\n'), () => this.queue.consumeLlm(now.getTime()))
+      candidates = await extractWithLlm(
+        this.ctx,
+        input.userMessages.join('\n\n'),
+        () => this.queue.consumeLlm(now.getTime()),
+        input.model,
+      )
     }
     if (candidates.length === 0) {
       await this.queue.noteRun(slug, now.getTime())
