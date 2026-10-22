@@ -7,7 +7,7 @@
 当前状态：**M0 完成 + M1 主体完成，代码可构建、测试全绿，尚未在真实 dsh 里跑过**。
 
 ```
-typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只 require react)   tests 95/95 ✓
+typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只 require react)   tests 97/97 ✓
 ```
 
 | 里程碑 | 状态 | 说明 |
@@ -54,7 +54,7 @@ npm run market        # 用当前 HEAD 生成 market/index.json（format:1，git
 
 ```bash
 pnpm install --registry=https://registry.npmjs.org   # ⚠️ 见下方 registry 说明
-npm run check      # typecheck → build → bundle 校验 → 95 个测试
+npm run check      # typecheck → build → bundle 校验 → 97 个测试
 npm run build      # lib/index.js + client/client.js
 ```
 
