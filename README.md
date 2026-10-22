@@ -28,11 +28,11 @@ typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只
 # 装进 desktop profile（也可以用 web profile）
 dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
 
-# 如果 master 还没合并最新提交，直接从 develop 装：
+# 想跟最新开发进度，就显式指定 develop：
 dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory#develop
 ```
 
-首次安装时 pnpm 会在克隆里跑 `prepare`（类型检查 + 构建 `lib/` 与 `client/`），所以需要能装到 devDependencies，**大约 1 分钟**。如果卡在下载，换成官方源：
+`lib/` 与 `client/` 是**随源码提交的发布产物**，安装时不做任何构建，几秒完成。这是刻意的：dsh profile 的 pnpm 供应链策略会拒绝 git 依赖的 `prepare`/`prepack`（报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`），所以仓库不能依赖安装期构建，修改源码后必须 `npm run build` 并把产物一起提交（CI 会检查产物是否过期）。如果卡在下载，换成官方源：
 
 ```bash
 npm_config_registry=https://registry.npmjs.org dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
@@ -54,7 +54,7 @@ npm run market        # 用当前 HEAD 生成 market/index.json（format:1，git
 
 ```bash
 pnpm install --registry=https://registry.npmjs.org   # ⚠️ 见下方 registry 说明
-npm run check      # typecheck → build → bundle 校验 → 63 个测试
+npm run check      # typecheck → build → bundle 校验 → 95 个测试
 npm run build      # lib/index.js + client/client.js
 ```
 

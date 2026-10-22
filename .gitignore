@@ -66,8 +66,8 @@ uploads/
 
 ### Node / TypeScript 插件工程 ###
 node_modules/
-/lib/
-/client/
+# lib/ 与 client/ 是随源码提交的发布产物：dsh 的 profile 用 pnpm 供应链策略，
+# git 依赖的安装期构建脚本（prepare/prepack）默认被拒，必须做到「装即所得」。
 /.tmp-client/
 /market/index.json
 *.tsbuildinfo

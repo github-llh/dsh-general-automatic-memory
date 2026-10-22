@@ -17,5 +17,12 @@ jobs:
       - run: corepack prepare pnpm@11.28.5 --activate
       - run: pnpm install --frozen-lockfile
       - run: npm run check
+      - name: committed build artifacts must be fresh
+        run: |
+          if [ -n "$(git status --porcelain -- lib client)" ]; then
+            echo "::error::lib/ or client/ is out of date. Run 'npm run build' and commit the artifacts."
+            git status --porcelain -- lib client
+            exit 1
+          fi
       - name: bundle must stay loadable
         run: node -e "const s=require('fs').readFileSync('client/client.js','utf8'); if(!s.startsWith('window.__ModuleLoader__.load({')) process.exit(1)"

@@ -39,8 +39,7 @@
     "test": "vitest run",
     "verify": "node scripts/verify-bundle.mjs",
     "check": "npm run typecheck && npm run build && npm run verify && npm run test && npm run market -- --verify",
-    "prepack": "npm run build && npm run verify",
-    "prepare": "npm run build",
+    "prepublishOnly": "npm run check",
     "market": "node scripts/make-market-index.mjs"
   },
   "dependencies": {
