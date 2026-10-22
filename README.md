@@ -27,6 +27,9 @@ typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只
 ```bash
 # 装进 desktop profile（也可以用 web profile）
 dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
+
+# 如果 master 还没合并最新提交，直接从 develop 装：
+dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory#develop
 ```
 
 首次安装时 pnpm 会在克隆里跑 `prepare`（类型检查 + 构建 `lib/` 与 `client/`），所以需要能装到 devDependencies，**大约 1 分钟**。如果卡在下载，换成官方源：
