@@ -18,6 +18,16 @@ interface FakeState {
   logs: string[]
 }
 
+/** Windows 下不关掉 SQLite 句柄就删不掉临时目录：统一在 afterEach 里回收 effect。 */
+const activeDisposers: Array<() => void> = []
+
+function trackEffect(fn: () => unknown): () => void {
+  const result = fn()
+  const dispose = typeof result === 'function' ? (result as () => void) : () => {}
+  activeDisposers.push(dispose)
+  return dispose
+}
+
 function makeCtx() {
   const state: FakeState = {
     tools: [],
@@ -36,10 +46,7 @@ function makeCtx() {
       error: (...args: unknown[]) => state.logs.push(args.join(' ')),
       success: (...args: unknown[]) => state.logs.push(args.join(' ')),
     },
-    effect: (fn: () => unknown) => {
-      fn()
-      return () => {}
-    },
+    effect: (fn: () => unknown) => trackEffect(fn),
     on: (event: string, listener: (...args: unknown[]) => unknown) => {
       const list = state.listeners.get(event) ?? []
       list.push(listener)
@@ -103,10 +110,7 @@ function makeStrictCtx() {
       error: (...args: unknown[]) => logs.push(args.join(' ')),
       success: (...args: unknown[]) => logs.push(args.join(' ')),
     },
-    effect: (fn: () => unknown) => {
-      fn()
-      return () => {}
-    },
+    effect: (fn: () => unknown) => trackEffect(fn),
     on: () => () => {},
     get: () => undefined,
     inject: () => () => {},
@@ -137,6 +141,14 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  // 先关插件/SQLite 句柄，再删目录：Windows 上顺序反了会 EBUSY
+  for (const dispose of activeDisposers.splice(0).reverse()) {
+    try {
+      dispose()
+    } catch {
+      // 收尾失败不该掩盖原始测试错误
+    }
+  }
   await rm(root, { recursive: true, force: true })
 })
 

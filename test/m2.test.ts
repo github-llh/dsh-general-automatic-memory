@@ -17,12 +17,21 @@ import type { SearchHit } from '../src/host/api.js'
 import type { Candidate } from '../src/host/ingest/extract.js'
 
 let root: string
+const services: MemoryService[] = []
+
+async function createService(config: typeof DEFAULT_CONFIG): Promise<MemoryService> {
+  const service = await MemoryService.create(config, root)
+  services.push(service)
+  return service
+}
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'gam-m2-'))
 })
 
 afterEach(async () => {
+  // Windows：先关 SQLite 句柄再删目录，否则 .cache/fts.sqlite 会 EBUSY
+  for (const service of services.splice(0)) service.dispose()
   await rm(root, { recursive: true, force: true })
 })
 
@@ -282,7 +291,7 @@ describe('导入服务（记忆文件）', () => {
   }
 
   it('scans a generic directory and reports a dry-run estimate without writing', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService(DEFAULT_CONFIG)
     const ingestor = new Ingestor(api, DEFAULT_CONFIG)
     const importer = new ImportService(api, ingestor, DEFAULT_CONFIG)
     const src = await makeSourceDir()
@@ -297,7 +306,7 @@ describe('导入服务（记忆文件）', () => {
   })
 
   it('applies a selected subset, creates a snapshot, and dedupes on rescan', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService(DEFAULT_CONFIG)
     const ingestor = new Ingestor(api, DEFAULT_CONFIG)
     const importer = new ImportService(api, ingestor, DEFAULT_CONFIG)
     const src = await makeSourceDir()
@@ -321,7 +330,7 @@ describe('导入服务（记忆文件）', () => {
 
 describe('自动写入（默认 auto 模式）', () => {
   it('writes persona/feedback immediately and can be undone afterwards', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService(DEFAULT_CONFIG)
     const ingestor = new Ingestor(api, DEFAULT_CONFIG)
     const result = await ingestor.ingestTurn({
       sid: 's-auto',
@@ -343,7 +352,7 @@ describe('自动写入（默认 auto 模式）', () => {
 
 describe('自动写入（suggest 模式）', () => {
   it('queues a feedback candidate instead of writing it, then writes on approval', async () => {
-    const api = await MemoryService.create(SUGGEST_CONFIG, root)
+    const api = await createService(SUGGEST_CONFIG)
     const ingestor = new Ingestor(api, SUGGEST_CONFIG)
     const result = await ingestor.ingestTurn({
       sid: 's1',
@@ -367,7 +376,7 @@ describe('自动写入（suggest 模式）', () => {
   })
 
   it('auto-writes project candidates without asking (they are in autoKinds)', async () => {
-    const api = await MemoryService.create(SUGGEST_CONFIG, root)
+    const api = await createService(SUGGEST_CONFIG)
     const ingestor = new Ingestor(api, SUGGEST_CONFIG)
     const result = await ingestor.ingestTurn({
       sid: 's2',
@@ -383,7 +392,7 @@ describe('自动写入（suggest 模式）', () => {
   })
 
   it('expires unactioned proposals into a silent NOOP', async () => {
-    const api = await MemoryService.create(SUGGEST_CONFIG, root)
+    const api = await createService(SUGGEST_CONFIG)
     const ingestor = new Ingestor(api, SUGGEST_CONFIG)
     await ingestor.ingestTurn({
       sid: 's3',
@@ -399,7 +408,7 @@ describe('自动写入（suggest 模式）', () => {
   })
 
   it('stores the turn as an episode even when no candidate is extracted', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService(DEFAULT_CONFIG)
     const ingestor = new Ingestor(api, DEFAULT_CONFIG)
     const result = await ingestor.ingestTurn({
       sid: 's4',

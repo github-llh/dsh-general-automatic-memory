@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -10,12 +11,21 @@ import { MemoryStore } from '../src/host/store.js'
 import { matchGlob, extractTouchedPaths } from '../src/host/adapters/inject.js'
 
 let root: string
+const services: MemoryService[] = []
+
+async function createService(): Promise<MemoryService> {
+  const service = await MemoryService.create(DEFAULT_CONFIG, root)
+  services.push(service)
+  return service
+}
 
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'gam-test-'))
 })
 
 afterEach(async () => {
+  // Windows：SQLite 句柄不关就删不掉 .cache/fts.sqlite
+  for (const service of services.splice(0)) service.dispose()
   await rm(root, { recursive: true, force: true })
 })
 
@@ -172,7 +182,7 @@ describe('store', () => {
 
 describe('service', () => {
   it('generates derived indexes and keeps them content-hash stable', async () => {
-    const service = await MemoryService.create(DEFAULT_CONFIG, root)
+    const service = await createService()
     const indexPath = path.join(root, 'INDEX.md')
 
     await service.create({ kind: 'feedback', title: '别加总结', summary: '用户自己读 diff', body: '正文', source: 'user-stated' })
@@ -194,7 +204,7 @@ describe('service', () => {
   })
 
   it('search finds a memory by a Chinese phrase and gates low-relevance hits', async () => {
-    const service = await MemoryService.create(DEFAULT_CONFIG, root)
+    const service = await createService()
     await service.create({ kind: 'project', title: '鉴权中间件重写', summary: 'session token 存 cookie，合规要求', body: '因为 legal  flagged 会话 token 存储方式', source: 'user-stated', scope: 'project', project: projectSlug('/repo/demo') })
     await service.create({ kind: 'persona', title: '后端出身', summary: '十年 Go，第一次碰 React', body: '前端解释请类比后端概念', source: 'user-stated' })
 
@@ -207,7 +217,7 @@ describe('service', () => {
   })
 
   it('rejects a stale optimistic-lock update with 409 semantics', async () => {
-    const service = await MemoryService.create(DEFAULT_CONFIG, root)
+    const service = await createService()
     const created = await service.create({ kind: 'reference', title: 't', summary: 's', body: 'b' })
     const stale = await service.update(created.meta.id, 'new body', 99)
     expect(stale.ok).toBe(false)
@@ -216,7 +226,7 @@ describe('service', () => {
   })
 
   it('hard delete requires the id tail as confirmation', async () => {
-    const service = await MemoryService.create(DEFAULT_CONFIG, root)
+    const service = await createService()
     const created = await service.create({ kind: 'reference', title: 't', summary: 's', body: 'b' })
     const refused = await service.hardDelete(created.meta.id, 'wrong')
     expect('error' in refused).toBe(true)
@@ -229,7 +239,7 @@ describe('service', () => {
   })
 
   it('keeps the catalog within budget and records the injection share', async () => {
-    const service = await MemoryService.create(DEFAULT_CONFIG, root)
+    const service = await createService()
     for (let i = 0; i < 40; i++) {
       await service.create({ kind: 'project', title: `条目 ${i}`, summary: `第 ${i} 条摘要`, body: 'b', scope: 'project', project: projectSlug('/repo/demo') })
     }
@@ -239,5 +249,15 @@ describe('service', () => {
     const stats = await service.stats()
     expect(stats.recall.lastShare).toBe(0.05)
     expect(stats.alerts.some((a) => a.code === 'budget-overrun')).toBe(true)
+  })
+
+  it('dispose releases the SQLite handle so .cache can be removed', async () => {
+    const service = await createService()
+    await service.create({ kind: 'reference', title: 't', summary: 's', body: 'b' })
+    service.dispose()
+    // 关成功后 SQLite 会收掉 WAL/SHM；这两文件还在说明句柄没释放，Windows 上就删不掉目录
+    expect(existsSync(path.join(root, '.cache', 'fts.sqlite-wal'))).toBe(false)
+    expect(existsSync(path.join(root, '.cache', 'fts.sqlite-shm'))).toBe(false)
+    await rm(path.join(root, '.cache'), { recursive: true, force: true })
   })
 })

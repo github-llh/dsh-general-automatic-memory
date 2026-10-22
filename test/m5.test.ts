@@ -10,16 +10,26 @@ import { createSnapshot, diffSnapshots, restoreSnapshot } from '../src/host/snap
 import { projectSlug } from '../src/host/paths.js'
 
 let root: string
+const services: MemoryService[] = []
+
+async function createService(): Promise<MemoryService> {
+  const service = await MemoryService.create(DEFAULT_CONFIG, root)
+  services.push(service)
+  return service
+}
+
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'gam-m5-'))
 })
 afterEach(async () => {
+  // Windows：先关 SQLite 句柄再删目录，否则 .cache/fts.sqlite 会 EBUSY
+  for (const service of services.splice(0)) service.dispose()
   await rm(root, { recursive: true, force: true })
 })
 
 describe('固化 curator', () => {
   it('merges near-duplicate entries and archives the loser', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService()
     await api.create({ kind: 'feedback', title: '别加总结', summary: '用户自己读 diff', body: '短版本。', source: 'user-stated' })
     await api.create({ kind: 'feedback', title: '别加总结', summary: '用户自己读 diff', body: '长版本，补充了为什么。', source: 'user-stated' })
     expect(api.list()).toHaveLength(2)
@@ -32,7 +42,7 @@ describe('固化 curator', () => {
   })
 
   it('promotes a topic that repeats across sessions into one project memory', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService()
     const slug = projectSlug('/repo/demo')
     await api.episodes.append(slug, { sid: 's1', turn: 1, topic: '鉴权方案', user: '', outcome: '决定用 cookie 存 token', src: 'user' })
     await api.episodes.append(slug, { sid: 's2', turn: 1, topic: '鉴权方案', user: '', outcome: '确认 compliance 要求 cookie', src: 'user' })
@@ -49,7 +59,7 @@ describe('固化 curator', () => {
   })
 
   it('never demotes hot entries, and archives cold ones', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService()
     const hot = await api.create({ kind: 'reference', title: '看板', summary: 'grafana 内网', body: 'b', source: 'user-stated' })
     await api.store.patchMeta(hot.meta.id, (meta) => ({ ...meta, stats: { ...meta.stats, hits: 9, heat: 0.9, lastUsedAt: new Date().toISOString() } }))
     const cold = await api.create({ kind: 'reference', title: '旧地址', summary: '早就没用了', body: 'b', source: 'user-stated' })
@@ -67,7 +77,7 @@ describe('固化 curator', () => {
 
 describe('快照 diff 与回滚', () => {
   it('detects changes and restores the previous bytes', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService()
     const created = await api.create({ kind: 'feedback', title: '别加总结', summary: 's', body: '原始正文', source: 'user-stated' })
     const before = await createSnapshot(root, 'before')
     await api.update(created.meta.id, '被改过的正文', 1)
@@ -111,7 +121,7 @@ describe('投影（受管区块）', () => {
 
 describe('zip 导入导出', () => {
   it('round-trips the truth source without the cache', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService()
     await api.create({ kind: 'feedback', title: '别加总结', summary: 's', body: '正文', source: 'user-stated' })
     const exported = await exportZip(root)
     expect(exported.files).toBeGreaterThanOrEqual(1)
@@ -127,7 +137,7 @@ describe('zip 导入导出', () => {
   })
 
   it('skips files that already exist instead of silently overwriting newer memory', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService()
     await api.create({ kind: 'feedback', title: '别加总结', summary: 's', body: '正文', source: 'user-stated' })
     const exported = await exportZip(root)
     const imported = await importZip(root, exported.path)
@@ -138,7 +148,7 @@ describe('zip 导入导出', () => {
 
 describe('L1 FTS5 索引', () => {
   it('is a rebuildable cache: search still works and the backend reports l1', async () => {
-    const api = await MemoryService.create(DEFAULT_CONFIG, root)
+    const api = await createService()
     await api.create({ kind: 'project', title: '鉴权中间件重写', summary: 'session token 存 cookie', body: '合规要求', source: 'user-stated', scope: 'project', project: projectSlug('/repo/demo') })
     expect(api.indexBackend).toBe('l1')
     const hits = api.search('鉴权中间件')
@@ -147,7 +157,7 @@ describe('L1 FTS5 索引', () => {
     // 删掉缓存后重启：应自动重建，不需要任何人工步骤
     api.dispose()
     await rm(path.join(root, '.cache', 'fts.sqlite'), { force: true })
-    const again = await MemoryService.create(DEFAULT_CONFIG, root)
+    const again = await createService()
     expect(again.indexBackend).toBe('l1')
     expect(again.search('鉴权').length).toBeGreaterThan(0)
   })

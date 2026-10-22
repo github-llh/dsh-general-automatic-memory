@@ -34,7 +34,12 @@ export function apply(ctx: HostContext, config: MemoryConfig): void {
     void (async () => {
       try {
         const api = await MemoryService.create(merged, root)
-        if (disposed) return
+        if (disposed) {
+          // effect 在初始化完成前就被卸载：句柄必须立刻还回去，否则 Windows 删不掉 .cache
+          api.dispose()
+          return
+        }
+        disposers.push(() => api.dispose())
         const ingestor = new Ingestor(api, merged, ctx)
         const importer = new ImportService(api, ingestor, merged)
         // 注册期能力不能在 apply 时假设服务已就绪：用 inject 等待；
