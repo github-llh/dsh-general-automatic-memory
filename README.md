@@ -27,9 +27,6 @@ typecheck ✓   build ✓ (host ~190 KB / client 52 KB)   bundle verify ✓ (只
 ```bash
 # 装进 desktop profile（也可以用 web profile）
 dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory
-
-# 想跟最新开发进度，就显式指定 develop：
-dsh plugin --profile desktop add github:github-llh/dsh-general-automatic-memory#develop
 ```
 
 `lib/` 与 `client/` 是**随源码提交的发布产物**，安装时不做任何构建，几秒完成。这是刻意的：dsh profile 的 pnpm 供应链策略会拒绝 git 依赖的 `prepare`/`prepack`（报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`），所以仓库不能依赖安装期构建，修改源码后必须 `npm run build` 并把产物一起提交（CI 会检查产物是否过期）。如果卡在下载，换成官方源：
