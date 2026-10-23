@@ -1,7 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { removeDir, waitForService } from './support.js'
 
 // 刻意 import **构建产物**而不是 src：这条测试守的是"真正会被 dsh 加载的那个文件"
 import { apply } from '../lib/index.js'
@@ -152,17 +153,14 @@ afterEach(async () => {
       // 收尾失败不该掩盖原始测试错误
     }
   }
-  await rm(root, { recursive: true, force: true })
+  await removeDir(root)
 })
 
 async function boot(config: Partial<MemoryConfig> = {}) {
   const { ctx, state } = makeCtx()
   apply(ctx as never, { ...DEFAULT_CONFIG, memoryRoot: root, ...config } as MemoryConfig)
   // apply 里的初始化是异步的：等 generalMemory 服务出现
-  for (let i = 0; i < 200 && state.provided.generalMemory === undefined; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 5))
-  }
-  const api = state.provided.generalMemory as Api | undefined
+  const api = await waitForService(() => state.provided.generalMemory as Api | undefined)
   if (!api) throw new Error(`plugin did not activate; logs: ${state.logs.join(' | ')}`)
   return { state, api }
 }

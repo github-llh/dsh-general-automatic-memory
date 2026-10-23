@@ -9,6 +9,7 @@ import { DEFAULT_CONFIG } from '../src/config.js'
 import { projectSlug } from '../src/host/paths.js'
 import { MemoryStore } from '../src/host/store.js'
 import { matchGlob, extractTouchedPaths } from '../src/host/adapters/inject.js'
+import { removeDir } from './support.js'
 
 let root: string
 const services: MemoryService[] = []
@@ -26,7 +27,7 @@ beforeEach(async () => {
 afterEach(async () => {
   // Windows：SQLite 句柄不关就删不掉 .cache/fts.sqlite
   for (const service of services.splice(0)) service.dispose()
-  await rm(root, { recursive: true, force: true })
+  await removeDir(root)
 })
 
 describe('路径边界（Host 插件代码不受 workspace sandbox 约束，边界必须自己守）', () => {

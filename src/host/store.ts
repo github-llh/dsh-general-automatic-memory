@@ -1,4 +1,4 @@
-import { rm } from 'node:fs/promises'
+import { rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import { ensureDir, listSubdirs, readTextFile, resolveInRoot, walkMarkdown, writeFileAtomic } from './files.js'
@@ -115,17 +115,88 @@ export class MemoryStore {
     return dirs
   }
 
+  // ---------------------------------------------------------------------------
+  // 增量扫描
+  //
+  // 旧实现每次 refresh 都把全部条目重新读+解析一遍：写入 N 条就是 N 次全量扫描，
+  // 导入 100 条等于 100×100 次文件读（O(N²)）。Windows 上每读一个文件都要过
+  // 实时扫描，5s 测试超时就是这么来的。
+  //
+  // 指纹 = `size:mtimeMs:epoch`。size+mtimeMs 覆盖**外部**改动（用户手改、
+  // 另一台设备同步过来），epoch 是进程内自增的写入世代——同一毫秒内连写两次
+  // 且文件大小不变时（例如只改 heat），粗粒度 mtime 可能骗过指纹，世代计数器
+  // 保证自身写入永远可见。
+  // ---------------------------------------------------------------------------
+
+  private fingerprintCache = new Map<string, { fingerprint: string; entry: Entry }>()
+  private writeEpochs = new Map<string, number>()
+  private writeEpoch = 0
+  private lastScan: ScanResult | null = null
+
+  private fingerprintOf(size: number, mtimeMs: number, rel: string): string {
+    return `${size}:${mtimeMs}:${this.writeEpochs.get(rel) ?? 0}`
+  }
+
+  /** 写入后把定稿条目直接塞进缓存，下一次扫描不必再把刚写的文件读回来。 */
+  private remember(rel: string, entry: Entry, size: number, mtimeMs: number): void {
+    this.fingerprintCache.set(rel, { fingerprint: this.fingerprintOf(size, mtimeMs, rel), entry })
+    // 内存索引也要跟着更新：否则连写两次 frontmatter 时，第二次会拿第一次之前的
+    // 旧值打补丁（patchMeta 的 get 走的就是这里）。
+    if (!this.lastScan) return
+    const at = this.lastScan.entries.findIndex((row) => row.rel === rel)
+    if (at >= 0) this.lastScan.entries[at] = entry
+    else this.lastScan.entries.push(entry)
+  }
+
+  /**
+   * 文件被移走/删掉后必须立刻退出缓存。否则 lastScan 会把已经不存在的 active 副本
+   * 当幽灵返回——hardDelete 就会报"删了 2 个文件"，实际只剩归档那一份。
+   */
+  private forget(rel: string): void {
+    this.fingerprintCache.delete(rel)
+    this.writeEpochs.delete(rel)
+    if (!this.lastScan) return
+    this.lastScan = {
+      entries: this.lastScan.entries.filter((entry) => entry.rel !== rel),
+      issues: this.lastScan.issues.filter((issue) => issue.rel !== rel),
+    }
+  }
+
   /** 扫描全部活跃条目。单个文件解析失败不影响其余，问题收集进 issues 交给 doctor。 */
   async scan(): Promise<ScanResult> {
+    const rels = await walkMarkdown(this.root, await this.scanDirs())
     const entries: Entry[] = []
     const issues: ScanIssue[] = []
-    for (const rel of await walkMarkdown(this.root, await this.scanDirs())) {
+    const seen = new Set<string>()
+
+    for (const rel of rels) {
       if (isDerivedMarkdown(rel)) continue
-      const text = await readTextFile(resolveInRoot(this.root, rel))
-      if (text === null) continue
+      seen.add(rel)
+      const abs = resolveInRoot(this.root, rel)
+      let fingerprint: string | null = null
       try {
-        entries.push(parseFrontmatter(text, rel))
+        const stats = await stat(abs)
+        fingerprint = this.fingerprintOf(stats.size, stats.mtimeMs, rel)
+      } catch {
+        fingerprint = null // 文件在读之前被删掉了：当作不存在
+      }
+      const cached = this.fingerprintCache.get(rel)
+      if (fingerprint !== null && cached && cached.fingerprint === fingerprint) {
+        entries.push(cached.entry)
+        continue
+      }
+      const text = await readTextFile(abs)
+      if (text === null) {
+        this.fingerprintCache.delete(rel)
+        continue
+      }
+      try {
+        const entry = parseFrontmatter(text, rel)
+        if (fingerprint !== null) this.fingerprintCache.set(rel, { fingerprint, entry })
+        else this.fingerprintCache.delete(rel)
+        entries.push(entry)
       } catch (cause) {
+        this.fingerprintCache.delete(rel)
         issues.push({
           rel,
           issue: cause instanceof FrontmatterError ? 'invalid' : 'parse',
@@ -133,7 +204,31 @@ export class MemoryStore {
         })
       }
     }
-    return { entries, issues }
+
+    // 被删/被移走的文件要退出缓存，否则复活一次就会读到幽灵条目
+    for (const rel of [...this.fingerprintCache.keys()]) {
+      if (!seen.has(rel)) this.fingerprintCache.delete(rel)
+    }
+
+    this.lastScan = { entries, issues }
+    return this.lastScan
+  }
+
+  /**
+   * 按 id 取条目。**不做全量扫描**：先查上次扫描结果与写入缓存（都在内存），
+   * 一次都没扫过才扫一遍。patchMeta / invalidate / archive / hardDelete 都走这里——
+   * 旧实现为了改一条 frontmatter 把整个库重读一遍。
+   */
+  async get(id: string): Promise<Entry | null> {
+    const cached = this.lastScan?.entries.find((entry) => entry.meta.id === id)
+    if (cached) return cached
+    // 刚 put 过、还没到下一次 scan 的条目只在写入缓存里
+    const pending = [...this.fingerprintCache.values()].find((row) => row.entry.meta.id === id)?.entry
+    if (pending) return pending
+    // 已经扫过且两处都没有 → 活跃条目里确实没有；扫过还再全量扫一遍就是纯浪费
+    if (this.lastScan) return null
+    const { entries } = await this.scan()
+    return entries.find((entry) => entry.meta.id === id) ?? null
   }
 
   buildMeta(input: NewEntryInput): Frontmatter {
@@ -189,6 +284,14 @@ export class MemoryStore {
     const rel = this.relFor(meta.kind, meta.scope, meta.project, meta.id)
     const stamped: Frontmatter = { ...meta, checksum: checksumOf(normalized) }
     await writeFileAtomic(resolveInRoot(this.root, rel), serializeEntry(stamped, normalized))
+    // 自身写入：抬世代 + 直接把定稿条目入缓存，下一次扫描零读取
+    this.writeEpochs.set(rel, ++this.writeEpoch)
+    try {
+      const stats = await stat(resolveInRoot(this.root, rel))
+      this.remember(rel, { meta: stamped, body: normalized, rel }, stats.size, stats.mtimeMs)
+    } catch {
+      // stat 失败不影响写入本身，下次扫描按新世代重读即可
+    }
     return rel
   }
 
@@ -199,11 +302,6 @@ export class MemoryStore {
     const meta = patch(entry.meta)
     await this.put(meta, entry.body)
     return { meta, body: entry.body, rel: entry.rel }
-  }
-
-  async get(id: string): Promise<Entry | null> {
-    const { entries } = await this.scan()
-    return entries.find((e) => e.meta.id === id) ?? null
   }
 
   /**
@@ -241,6 +339,7 @@ export class MemoryStore {
     const rel = path.posix.join(DIRS.archive, now.slice(0, 4), `${meta.id}.md`)
     await writeFileAtomic(resolveInRoot(this.root, rel), serializeEntry(meta, body))
     await rm(resolveInRoot(this.root, activeRel), { force: true })
+    this.forget(activeRel)
     return rel
   }
 
@@ -250,6 +349,7 @@ export class MemoryStore {
     const entry = await this.get(id)
     if (entry) {
       await rm(resolveInRoot(this.root, entry.rel), { force: true })
+      this.forget(entry.rel)
       deleted.push(entry.rel)
     }
     for (const rel of await walkMarkdown(this.root, [DIRS.archive])) {

@@ -15,6 +15,7 @@ import { decompressZstdFrames, mineTurns, parseCodexSession, parseDshSession, pa
 import { MemoryStore } from '../src/host/store.js'
 import type { SearchHit } from '../src/host/api.js'
 import type { Candidate } from '../src/host/ingest/extract.js'
+import { removeDir } from './support.js'
 
 let root: string
 const services: MemoryService[] = []
@@ -32,7 +33,7 @@ beforeEach(async () => {
 afterEach(async () => {
   // Windows：先关 SQLite 句柄再删目录，否则 .cache/fts.sqlite 会 EBUSY
   for (const service of services.splice(0)) service.dispose()
-  await rm(root, { recursive: true, force: true })
+  await removeDir(root)
 })
 
 const NOW = new Date('2026-10-21T10:00:00Z')
@@ -338,7 +339,7 @@ describe('导入服务（记忆文件）', () => {
       expect(report.estimate.added).toBeGreaterThan(0)
       expect(api.list()).toHaveLength(0) // 扫描绝不写盘
     } finally {
-      await rm(src, { recursive: true, force: true })
+      await removeDir(src)
     }
   })
 
@@ -363,7 +364,7 @@ describe('导入服务（记忆文件）', () => {
       expect(titles).not.toContain('鉴权')
       expect(again.skipped.some((row) => row.reason === 'already-imported')).toBe(true)
     } finally {
-      await rm(src, { recursive: true, force: true })
+      await removeDir(src)
     }
   })
 
@@ -386,7 +387,7 @@ describe('导入服务（记忆文件）', () => {
       expect(second.items.map((item) => item.title)).toContain('部署')
       expect(second.items.map((item) => item.title)).not.toContain('提交规范')
     } finally {
-      await rm(src, { recursive: true, force: true })
+      await removeDir(src)
     }
   })
 })

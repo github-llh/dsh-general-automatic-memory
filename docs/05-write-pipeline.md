@@ -17,7 +17,7 @@
 | 会话结束 | `session/event` → `session/end-seed` / `workspace/session-stop` |  flush 队列 + 生成项目白板 | — |
 | 空闲 | `agent/status === 'idle'`（**不 poll**，只在事件回调里读） | 跑一次轻量固化 | 距上次 ≥10 min |
 | 定时 | `dsh-schedule`（cron + IANA 时区）或 `ctx.setInterval` | 每日固化 + 归档 + 快照 | 默认 09:30 |
-| 文件变更 | watcher + `.cache/fingerprints.json` | 用户手改了条目 → 重算 checksum、增量重建索引 | 自身写入豁免 |
+| 文件变更 | 内存指纹表（`size:mtimeMs:写入世代`） | 用户手改了条目 → 只重读该文件、增量重建索引 | 自身写入抬世代，必定可见 |
 | 用户显式 | `/remember`、`memory_write`、面板编辑 | 立即处理，跳过队列 | — |
 
 **为什么不做心跳轮询**：官方 `practices.md` 原文 *"Do not poll `agent/status`. `whenIdle()` does not mean one follow-up finished."* 前作有 `polling-heartbeat.json` + `awayMinutes: 60` + `unattendedAutoHours: ["22:00-08:00"]` 一整套轮询/在场检测。我们保留"多进程心跳"（那是并发选主必需的），但**不用轮询做触发**。
@@ -133,7 +133,7 @@ user-stated / manual  >  feedback（用户纠正过）  >  model-inferred  >  to
 4. fsync 文件
 5. rename 到目标路径（原子）
 6. fsync 父目录
-7. 更新 .cache/fingerprints.json（含自身写入豁免标记）
+7. 更新内存指纹表（size:mtimeMs:写入世代）
 8. 增量重建受影响的索引段落（按 sourceRevisions 比对哈希）
 9. 审计一行
 ```

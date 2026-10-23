@@ -148,10 +148,11 @@ export class MemoryService {
 
   async rebuildDerived(): Promise<{ written: string[]; unchanged: string[] }> {
     const files = derivedFiles(this.entries, { alwaysChars: this.config.budget.alwaysChars })
+    // 派生文件是缓存：原子换名但不 fsync（见 files.ts 的 durability 分层）
     return writeDerived(
       this.root,
       files,
-      (abs, data) => writeFileAtomic(abs, data),
+      (abs, data) => writeFileAtomic(abs, data, { durable: false }),
       (abs) => readTextFile(abs),
     )
   }

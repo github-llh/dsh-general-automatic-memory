@@ -40,17 +40,22 @@ export function hasExtension(name: string, ext: string): boolean {
 }
 
 /**
- * 原子写：临时文件 → fsync 文件 → rename → fsync 父目录。
- * rename 是原子的，所以任何时刻读到的都是完整旧版或完整新版，不存在半写状态。
+ * 原子写：临时文件 → rename（→ 可选 fsync）。
+ *
+ * `durable` 只对**真相源**开：条目正文与审计流水值得为每次写入付 fsync 的代价。
+ * 派生文件（INDEX.md / PROFILE.md / graph.jsonl）是可再生产物，删了下次 refresh
+ * 就重建，用 `durable: false`：rename 依然保证读者永远看到完整旧版或完整新版，
+ * 但不必把磁盘同步成本摊到每一次记忆写入上——Windows 上一次 fsync 就是几十毫秒，
+ * 而每次 create 会重写两个派生文件，这就是 CI 超时的主要来源。
  */
-export async function writeFileAtomic(abs: string, data: string): Promise<void> {
+export async function writeFileAtomic(abs: string, data: string, opts: { durable?: boolean } = {}): Promise<void> {
   await ensureDir(path.dirname(abs))
   const tmp = `${abs}.tmp.${process.pid}.${Date.now().toString(36)}`
   let handle
   try {
     handle = await open(tmp, 'w', 0o600)
     await handle.writeFile(data, 'utf8')
-    await handle.sync()
+    if (opts.durable !== false) await handle.sync()
   } finally {
     await handle?.close()
   }
@@ -60,6 +65,7 @@ export async function writeFileAtomic(abs: string, data: string): Promise<void> 
     await rm(tmp, { force: true })
     throw cause
   }
+  if (opts.durable === false) return
   let dir
   try {
     dir = await open(path.dirname(abs), 'r')

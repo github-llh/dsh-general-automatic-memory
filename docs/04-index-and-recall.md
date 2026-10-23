@@ -36,7 +36,7 @@ ChatGPT 走的是另一条路——**没有向量库、没有知识图谱、没�
 
 **融合策略**：L1 与 L2 都开时用 **RRF（Reciprocal Rank Fusion）** 合并排名，再乘 `heat` 与 `confidence` 权重。不做 cross-encoder rerank（成本不划算）。
 
-**索引一致性**：`.cache/fingerprints.json` 存 `path → "<size>:<mtimeMs>"`（对标前作 `global-brief/<ws>.json` 的指纹表）。启动与每次写入后只重算指纹变化的文件 → 增量重建。全量重建耗时目标：1000 条目 < 2 s。
+**索引一致性（增量扫描）**：`MemoryStore` 在内存里维护 `path → {size, mtimeMs, 写入世代}` 的指纹表。每次扫描只重读指纹变化的文件，`size+mtimeMs` 覆盖外部改动（用户手改、别的设备同步过来），进程内自增的写入世代保证同一毫秒内连写两次也一定可见；`get(id)` 直接查内存索引，不再为改一条 frontmatter 全量扫描。**写入成本因此与库内条目数解耦**——旧实现导入 N 条要做 N 次全量扫描（O(N²)），Windows 上单次 create 被放大到秒级。全量重建耗时目标：1000 条目 < 2 s。
 
 ## 3. 注入管线
 

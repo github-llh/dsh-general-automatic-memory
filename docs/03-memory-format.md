@@ -87,7 +87,6 @@
     ├── fts.sqlite                        # L1：FTS5 + 元数据表
     ├── vectors/<model>.bin               # L2：本地向量（可选）
     ├── catalog.json                      # 目录层结构化缓存
-    ├── fingerprints.json                 # path → "<size>:<mtimeMs>"，增量重建用
     └── heartbeat.json                    # 多进程选主
 ```
 

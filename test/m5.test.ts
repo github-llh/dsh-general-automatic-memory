@@ -8,6 +8,7 @@ import { applyProjection, exportZip, importZip, mergeManagedBlock } from '../src
 import { curate } from '../src/host/curator.js'
 import { createSnapshot, diffSnapshots, restoreSnapshot } from '../src/host/snapshot.js'
 import { projectSlug } from '../src/host/paths.js'
+import { removeDir } from './support.js'
 
 let root: string
 const services: MemoryService[] = []
@@ -24,7 +25,7 @@ beforeEach(async () => {
 afterEach(async () => {
   // Windows：先关 SQLite 句柄再删目录，否则 .cache/fts.sqlite 会 EBUSY
   for (const service of services.splice(0)) service.dispose()
-  await rm(root, { recursive: true, force: true })
+  await removeDir(root)
 })
 
 describe('固化 curator', () => {

@@ -31,7 +31,7 @@ export class FtsIndex {
     }
   }
 
-  /** 增量同步：只重算 hash 变化的条目 */
+  /** 增量同步：只重算 hash 变化的条目。整批一个事务，避免每条一次 fsync。 */
   sync(entries: Entry[]): void {
     const known = new Map<string, string>()
     for (const row of this.db.prepare('SELECT id, hash FROM entry_meta').all() as Array<{ id: string; hash: string }>) {
@@ -43,34 +43,31 @@ export class FtsIndex {
     const deleteFts = this.db.prepare('DELETE FROM entry_fts WHERE id = ?')
 
     const seen = new Set<string>()
+    const changed: Entry[] = []
     for (const entry of entries) {
       const id = entry.meta.id
       seen.add(id)
-      const hash = hashOf(entry)
-      if (known.get(id) === hash) continue
-      const tokens = [...new Set(tokenize(indexable(entry)))].join(' ')
-      this.db.exec('BEGIN')
-      try {
-        deleteFts.run(id)
-        deleteMeta.run(id)
-        insertMeta.run(id, entry.meta.kind, hash)
-        insertFts.run(id, tokens)
-        this.db.exec('COMMIT')
-      } catch {
-        this.db.exec('ROLLBACK')
-      }
+      if (known.get(id) !== hashOf(entry)) changed.push(entry)
     }
-    // 删除已经不存在的条目
-    for (const id of known.keys()) {
-      if (seen.has(id)) continue
-      this.db.exec('BEGIN')
-      try {
+    const removed = [...known.keys()].filter((id) => !seen.has(id))
+    if (changed.length === 0 && removed.length === 0) return
+
+    this.db.exec('BEGIN')
+    try {
+      for (const entry of changed) {
+        const id = entry.meta.id
         deleteFts.run(id)
         deleteMeta.run(id)
-        this.db.exec('COMMIT')
-      } catch {
-        this.db.exec('ROLLBACK')
+        insertMeta.run(id, entry.meta.kind, hashOf(entry))
+        insertFts.run(id, [...new Set(tokenize(indexable(entry)))].join(' '))
       }
+      for (const id of removed) {
+        deleteFts.run(id)
+        deleteMeta.run(id)
+      }
+      this.db.exec('COMMIT')
+    } catch {
+      this.db.exec('ROLLBACK')
     }
   }
 
