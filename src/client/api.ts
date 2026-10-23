@@ -79,9 +79,18 @@ export interface Stats {
   bytes: number
   index: { lines: number; bytes: number; maxLines: number; maxBytes: number; overBudget: boolean }
   recall: {
-    inject: { events: number; hits: number; verbatim: number; zeroHit: number; chars: number; tokens: number; gated: number }
-    tool: { events: number; hits: number; zeroHit: number }
+    inject: {
+      events: number
+      hits: number
+      verbatim: number
+      prefixBreaks: number
+      zeroHit: number
+      chars: number
+      tokens: number
+    }
+    tool: { events: number; hits: number; zeroHit: number; gated: number }
     lastShare: number
+    lastShareAt: string | null
     maxShare: number
   }
   alerts: Array<{ level: 'error' | 'warn' | 'info'; code: string; message: string }>

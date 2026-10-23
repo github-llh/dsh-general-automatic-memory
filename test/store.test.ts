@@ -259,6 +259,26 @@ describe('service', () => {
     expect(stats.alerts.some((a) => a.code === 'budget-overrun')).toBe(true)
   })
 
+  it('reports INDEX lines/bytes that match the generated file exactly', async () => {
+    const service = await createService()
+    await service.createMany(
+      Array.from({ length: 3 }, (_, i) => ({
+        kind: 'project' as const,
+        title: `条目 ${i}`,
+        summary: `第 ${i} 条摘要`,
+        body: 'b',
+        source: 'user-stated' as const,
+      })),
+    )
+    const stats = await service.stats()
+    const index = await readFile(path.join(root, 'INDEX.md'), 'utf8')
+    const actualLines = index.endsWith('\n') ? index.split('\n').length - 1 : index.split('\n').length
+    expect(stats.index.lines).toBe(actualLines)
+    expect(stats.index.bytes).toBe(Buffer.byteLength(index, 'utf8'))
+    expect(index).toContain(`lines: ${actualLines} / ${stats.index.maxLines}`)
+    expect(index).toContain(`bytes: ${Buffer.byteLength(index, 'utf8')} / ${stats.index.maxBytes}`)
+  })
+
   it('dispose releases the SQLite handle so .cache can be removed', async () => {
     const service = await createService()
     await service.create({ kind: 'reference', title: 't', summary: 's', body: 'b' })

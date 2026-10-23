@@ -131,7 +131,10 @@ function makeStrictCtx() {
 interface Api {
   create(input: Record<string, unknown>): Promise<{ meta: { id: string } }>
   list(): unknown[]
-  stats(): Promise<{ entryCount: number }>
+  stats(): Promise<{
+    entryCount: number
+    recall: { tool: { events: number; hits: number; zeroHit: number; gated: number } }
+  }>
 }
 
 let root: string
@@ -409,5 +412,17 @@ describe('工具面', () => {
     expect(out).toContain('鉴权中间件重写')
     expect(out).not.toContain('因为合规要求') // 摘要层不含正文
     expect(out).toContain('m_')
+  })
+
+  it('counts an empty-query memory_recall (the catalog) as a real tool recall', async () => {
+    const { state, api } = await boot()
+    const exec = { signal: new AbortController().signal }
+    await tool(state, 'memory_write').execute({ title: '部署走 CI', summary: '不要手工上传', content: 'GitHub Actions', kind: 'project' }, exec)
+    const out = String(await tool(state, 'memory_recall').execute({}, exec))
+    expect(out).toContain('部署走 CI')
+    const recall = (await api.stats()).recall.tool
+    expect(recall.events).toBe(1)
+    expect(recall.hits).toBeGreaterThan(0)
+    expect(recall.zeroHit).toBe(0)
   })
 })

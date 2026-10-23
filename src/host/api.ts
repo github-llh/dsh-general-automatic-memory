@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import path from 'node:path'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { audit as writeAudit, type AuditAct } from './audit.js'
-import { derivedFiles, writeDerived, renderIndex, INDEX_LIMITS } from './catalog.js'
+import { derivedFiles, writeDerived, renderIndex, lineCount, INDEX_LIMITS } from './catalog.js'
 import { readTextFile, resolveInRoot, writeFileAtomic } from './files.js'
 import { computeHeat, isoNow, type Entry, type Frontmatter } from './model.js'
 import { SnapshotCache, Throttle, renderCatalogLayer, renderSnapshot, type InjectMode, type SnapshotResult } from './recall.js'
@@ -40,16 +40,30 @@ export interface Alert {
 }
 
 export interface RecallStats {
-  inject: { events: number; hits: number; verbatim: number; zeroHit: number; chars: number; tokens: number; gated: number }
-  tool: { events: number; hits: number; zeroHit: number }
+  inject: {
+    events: number
+    /** 目录层累计展示的条目数（不含 always/glob 层的条目数） */
+    hits: number
+    /** 与上一次注入逐字节相同（只比较文本，不比较 full/human 等 mode） */
+    verbatim: number
+    /** 相同 mode 下文本意外变化导致的前缀失效次数 */
+    prefixBreaks: number
+    zeroHit: number
+    chars: number
+    tokens: number
+  }
+  tool: { events: number; hits: number; zeroHit: number; gated: number }
   lastShare: number
+  /** 最近一次实测注入占比的时间；null = 从未测到（不能用 0.00% 冒充） */
+  lastShareAt: string | null
   maxShare: number
 }
 
 const EMPTY_RECALL: RecallStats = {
-  inject: { events: 0, hits: 0, verbatim: 0, zeroHit: 0, chars: 0, tokens: 0, gated: 0 },
-  tool: { events: 0, hits: 0, zeroHit: 0 },
+  inject: { events: 0, hits: 0, verbatim: 0, prefixBreaks: 0, zeroHit: 0, chars: 0, tokens: 0 },
+  tool: { events: 0, hits: 0, zeroHit: 0, gated: 0 },
   lastShare: 0,
+  lastShareAt: null,
   maxShare: 0,
 }
 
@@ -134,14 +148,12 @@ export class MemoryService {
 
   async rebuildDerived(): Promise<{ written: string[]; unchanged: string[] }> {
     const files = derivedFiles(this.entries, { alwaysChars: this.config.budget.alwaysChars })
-    const result = await writeDerived(
+    return writeDerived(
       this.root,
       files,
       (abs, data) => writeFileAtomic(abs, data),
       (abs) => readTextFile(abs),
     )
-    this.snapshots.clear()
-    return result
   }
 
   list(): Entry[] {
@@ -189,7 +201,7 @@ export class MemoryService {
   }
 
   /** 目录层的紧凑视图，供 memory_recall 无 query 时使用 */
-  catalog(project?: string): { text: string; shown: number; omitted: number } {
+  catalog(project?: string): { text: string; shown: number; omitted: number; ids: string[] } {
     return renderCatalogLayer(this.entries, this.config.budget.recallChars, project)
   }
 
@@ -286,11 +298,21 @@ export class MemoryService {
   }
 
   /**
+   * 空 query 的 memory_recall 返回的是目录层，没有逐条 id 可刷热度，
+   * 但仍是一次真实的工具召回，必须计入 events/hits/zeroHit。
+   */
+  noteCatalogRecall(shown: number): void {
+    this.recall.tool.events++
+    this.recall.tool.hits += shown
+    if (shown === 0) this.recall.tool.zeroHit++
+  }
+
+  /**
    * 被相关度门控裁掉的候选数。**必须可观测**——「该记的没被想起来」是记忆系统最痛的
-   * 失败模式，静默裁掉等于把 bug 藏起来。
+   * 失败模式，静默裁掉等于把 bug 藏起来。它发生在工具检索里，所以归 tool 而不是 inject。
    */
   noteGated(count: number): void {
-    this.recall.inject.gated += count
+    this.recall.tool.gated += count
   }
 
   // ---------------------------------------------------------------------------
@@ -316,25 +338,35 @@ export class MemoryService {
     }
     try {
       const parsed = JSON.parse(text) as { version?: number; recall?: unknown }
-      if (parsed.version !== 1 || !parsed.recall || typeof parsed.recall !== 'object') return
-      const loaded = parsed.recall as RecallStats
+      // v1 把 gated 误放在 inject 下，v2 起归到 tool；两种文件都要能无损读取
+      if ((parsed.version !== 1 && parsed.version !== 2) || !parsed.recall || typeof parsed.recall !== 'object') return
+      const loaded = parsed.recall as {
+        inject?: Record<string, unknown>
+        tool?: Record<string, unknown>
+        lastShare?: unknown
+        lastShareAt?: unknown
+      }
       const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0)
+      const measuredAt =
+        typeof loaded.lastShareAt === 'string' && !Number.isNaN(Date.parse(loaded.lastShareAt)) ? loaded.lastShareAt : null
       this.recall = {
         inject: {
           events: num(loaded.inject?.events),
           hits: num(loaded.inject?.hits),
           verbatim: num(loaded.inject?.verbatim),
+          prefixBreaks: num(loaded.inject?.prefixBreaks),
           zeroHit: num(loaded.inject?.zeroHit),
           chars: num(loaded.inject?.chars),
           tokens: num(loaded.inject?.tokens),
-          gated: num(loaded.inject?.gated),
         },
         tool: {
           events: num(loaded.tool?.events),
           hits: num(loaded.tool?.hits),
           zeroHit: num(loaded.tool?.zeroHit),
+          gated: num(loaded.tool?.gated ?? loaded.inject?.gated),
         },
-        lastShare: 0,
+        lastShare: num(loaded.lastShare),
+        lastShareAt: measuredAt,
         maxShare: this.config.budget.maxShareOfRequest,
       }
     } catch {
@@ -352,7 +384,7 @@ export class MemoryService {
 
   private async persistRecallStats(): Promise<void> {
     const abs = this.recallStatsPath
-    const body = `${JSON.stringify({ version: 1, updatedAt: isoNow(), recall: this.recall }, null, 2)}\n`
+    const body = `${JSON.stringify({ version: 2, updatedAt: isoNow(), recall: this.recall }, null, 2)}\n`
     try {
       await writeFileAtomic(abs, body)
     } catch {
@@ -363,7 +395,7 @@ export class MemoryService {
   /** 同步落盘：插件卸载（应用退出）时最后那点计数也要留住 */
   private persistRecallStatsSync(): void {
     const abs = this.recallStatsPath
-    const body = `${JSON.stringify({ version: 1, updatedAt: isoNow(), recall: this.recall }, null, 2)}\n`
+    const body = `${JSON.stringify({ version: 2, updatedAt: isoNow(), recall: this.recall }, null, 2)}\n`
     try {
       mkdirSync(path.dirname(abs), { recursive: true })
       const tmp = `${abs}.${process.pid}.tmp`
@@ -408,21 +440,22 @@ export class MemoryService {
         globChars: this.config.budget.globChars,
       },
     })
-    const verbatim = this.snapshots.wasVerbatim(sessionKey, candidate.fingerprint)
-    const result = this.snapshots.get(sessionKey, candidate)
+    const { result, verbatim, prefixBreak } = this.snapshots.commit(sessionKey, candidate)
 
     this.recall.inject.events++
     this.recall.inject.chars += result.chars.total
     this.recall.inject.tokens += result.tokens
     this.recall.inject.hits += result.shown
     if (verbatim) this.recall.inject.verbatim++
+    if (prefixBreak) this.recall.inject.prefixBreaks++
     // slim 态按设计就不给目录层，不能算「零命中」——否则节流会把指标淹成假警报
-    if (result.shown === 0 && result.mode !== 'slim' && this.entries.length > 0) this.recall.inject.zeroHit++
+    if (result.shown === 0 && opts.mode !== 'slim' && this.entries.length > 0) this.recall.inject.zeroHit++
     return result
   }
 
   setRequestShare(share: number): void {
     this.recall.lastShare = Number(share.toFixed(4))
+    this.recall.lastShareAt = isoNow()
     this.recall.maxShare = this.config.budget.maxShareOfRequest
   }
 
@@ -462,7 +495,7 @@ export class MemoryService {
       bySource[entry.meta.provenance.source] = (bySource[entry.meta.provenance.source] ?? 0) + 1
       bytes += Buffer.byteLength(entry.body, 'utf8')
     }
-    const lines = this.indexText.split('\n').length
+    const lines = lineCount(this.indexText)
     const indexBytes = Buffer.byteLength(this.indexText, 'utf8')
     // 上限来自配置：没测到占比时也要显示真实上限，而不是 0
     this.recall.maxShare = this.config.budget.maxShareOfRequest
@@ -491,7 +524,7 @@ export class MemoryService {
     for (const issue of this.issues.slice(0, 5)) {
       alerts.push({ level: 'error', code: 'entry-invalid', message: `${issue.rel}: ${issue.message}` })
     }
-    const lines = this.indexText.split('\n').length
+    const lines = lineCount(this.indexText)
     if (lines > INDEX_LIMITS.maxLines || Buffer.byteLength(this.indexText, 'utf8') > INDEX_LIMITS.maxBytes) {
       alerts.push({ level: 'warn', code: 'index-over-budget', message: `INDEX.md ${lines} lines exceeds ${INDEX_LIMITS.maxLines}; run consolidation` })
     }

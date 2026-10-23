@@ -21,7 +21,10 @@ export interface SnapshotInput {
 
 export interface SnapshotResult {
   text: string
+  /** 缓存身份：mode + 文本哈希 */
   fingerprint: string
+  /** 仅文本哈希：判断逐字节复读时不能把 mode 算进去，否则 full→human 会被误判为变化 */
+  contentHash: string
   mode: InjectMode
   chars: { always: number; catalog: number; glob: number; total: number }
   tokens: number
@@ -92,7 +95,11 @@ function pick(entries: Entry[], kind: string): Entry[] {
  *
  * 带上 id 是刻意的：模型可以直接 memory_read，省掉一次 recall 往返。
  */
-export function renderCatalogLayer(entries: Entry[], maxChars: number, project?: string): { text: string; shown: number; omitted: number } {
+export function renderCatalogLayer(
+  entries: Entry[],
+  maxChars: number,
+  project?: string,
+): { text: string; shown: number; omitted: number; ids: string[] } {
   const pool = entries
     .filter((e) => isActive(e) && e.meta.activation !== 'manual')
     .filter((e) => e.meta.scope === 'global' || (project !== undefined && e.meta.project === project))
@@ -111,18 +118,20 @@ export function renderCatalogLayer(entries: Entry[], maxChars: number, project?:
     .join(' ')}`
 
   const rows: string[] = []
+  const ids: string[] = []
   let used = heading.length + 1
   for (const entry of pool) {
     const row = `- ${entry.meta.title} — ${entry.meta.summary} [${entry.meta.kind}·${entry.meta.confidence}] ${entry.meta.id}`
     if (used + row.length + 1 > maxChars) break
     rows.push(row)
+    ids.push(entry.meta.id)
     used += row.length + 1
   }
   const shown = rows.length
   const omitted = pool.length - shown
   if (omitted > 0) rows.push(`+${omitted} more via memory_recall`)
-  if (shown === 0) return { text: '', shown: 0, omitted: pool.length }
-  return { text: `${heading}\n${rows.join('\n')}\n`, shown, omitted }
+  if (shown === 0) return { text: '', shown: 0, omitted: pool.length, ids: [] }
+  return { text: `${heading}\n${rows.join('\n')}\n`, shown, omitted, ids }
 }
 
 function renderGlobLayer(entries: Entry[], maxChars: number): string {
@@ -173,6 +182,7 @@ function finish(
   return {
     text,
     fingerprint: fingerprintOf(text, mode),
+    contentHash: contentHashOf(text),
     mode,
     chars: { ...chars, total: text.length },
     tokens: estimateTokens(text),
@@ -181,37 +191,50 @@ function finish(
   }
 }
 
+function contentHashOf(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16)
+}
+
 export function fingerprintOf(text: string, mode: InjectMode): string {
-  return `${mode}:${createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16)}`
+  return `${mode}:${contentHashOf(text)}`
 }
 
 /**
  * 逐字节幂等缓存（原则 P4）。
  *
- * 给定相同指纹，返回**上一次定稿的同一字符串实例**——不是重新渲染出的等值字符串。
- * 这保证注入到请求前缀的字节完全一致，DeepSeek 前缀缓存才能命中。
+ * 相同指纹返回**上一次定稿的同一字符串实例**，保证注入到请求前缀的字节完全一致。
+ * 遥测用 contentHash 比较：full 与 human 的 mode 不同但文本完全相同，这种情况
+ * 不应被算成前缀失效；只有「同一 mode 的文本相对上次注入变了」才是真正的意外漂移。
+ * 同 mode 基线要跨 slim 步骤保留，否则目录变更会被模式切换掩盖。
  */
 export class SnapshotCache {
-  private last = new Map<string, { fingerprint: string; result: SnapshotResult }>()
+  private last = new Map<
+    string,
+    {
+      fingerprint: string
+      contentHash: string
+      result: SnapshotResult
+      byMode: Partial<Record<InjectMode, string>>
+    }
+  >()
 
-  get(sessionKey: string, candidate: SnapshotResult): SnapshotResult {
+  commit(sessionKey: string, candidate: SnapshotResult): { result: SnapshotResult; verbatim: boolean; prefixBreak: boolean } {
     const prev = this.last.get(sessionKey)
-    if (prev && prev.fingerprint === candidate.fingerprint) return prev.result
-    this.last.set(sessionKey, { fingerprint: candidate.fingerprint, result: candidate })
-    return candidate
-  }
-
-  /** 命中缓存（= 原样复读）返回 true，用于 verbatimRate 遥测 */
-  wasVerbatim(sessionKey: string, fingerprint: string): boolean {
-    return this.last.get(sessionKey)?.fingerprint === fingerprint
+    const verbatim = prev !== undefined && prev.contentHash === candidate.contentHash
+    const previousSameMode = prev?.byMode[candidate.mode]
+    const prefixBreak = previousSameMode !== undefined && previousSameMode !== candidate.contentHash
+    const result = prev && prev.fingerprint === candidate.fingerprint ? prev.result : candidate
+    this.last.set(sessionKey, {
+      fingerprint: candidate.fingerprint,
+      contentHash: candidate.contentHash,
+      result,
+      byMode: { ...(prev?.byMode ?? {}), [candidate.mode]: candidate.contentHash },
+    })
+    return { result, verbatim, prefixBreak }
   }
 
   drop(sessionKey: string): void {
     this.last.delete(sessionKey)
-  }
-
-  clear(): void {
-    this.last.clear()
   }
 }
 

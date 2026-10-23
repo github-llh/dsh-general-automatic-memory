@@ -54,6 +54,7 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
       const query = typeof args.query === 'string' ? args.query : ''
       if (!query.trim()) {
         const catalog = api.catalog(typeof args.project === 'string' ? args.project : undefined)
+        api.noteCatalogRecall(catalog.shown)
         return catalog.text || '(memory is empty)'
       }
       const hits = api.search(query, {
@@ -129,12 +130,15 @@ const TOOLS: Record<string, (api: MemoryService, config: MemoryConfig) => ToolDe
         .sort((a, b) => (a[0] < b[0] ? -1 : 1))
         .map(([k, n]) => `${k}:${n}`)
         .join(' ')
+      const injection = s.recall.lastShareAt
+        ? `${(s.recall.lastShare * 100).toFixed(2)}% of request (cap ${(s.recall.maxShare * 100).toFixed(0)}%, measured ${s.recall.lastShareAt})`
+        : 'not measured yet'
       const lines = [
         `root: ${s.root}`,
         `entries: ${s.entryCount} (${kinds || 'none'})`,
         `index: ${s.index.lines}/${s.index.maxLines} lines, ${s.index.bytes}/${s.index.maxBytes} bytes${s.index.overBudget ? ' — OVER BUDGET' : ''}`,
-        `injection: ${(s.recall.lastShare * 100).toFixed(2)}% of request (cap ${(s.recall.maxShare * 100).toFixed(0)}%)`,
-        `recall: inject ${s.recall.inject.events} events / ${s.recall.inject.hits} hits / verbatim ${s.recall.inject.verbatim} · tool ${s.recall.tool.events} events / zeroHit ${s.recall.tool.zeroHit} · gated ${s.recall.inject.gated}`,
+        `injection: ${injection}`,
+        `recall: inject ${s.recall.inject.events} events / ${s.recall.inject.hits} catalog entries / verbatim ${s.recall.inject.verbatim} / prefixBreaks ${s.recall.inject.prefixBreaks} · tool ${s.recall.tool.events} events / hits ${s.recall.tool.hits} / zeroHit ${s.recall.tool.zeroHit} / gated ${s.recall.tool.gated}`,
         s.issues.length > 0 ? `issues: ${s.issues.length} (run /memory doctor)` : 'issues: none',
       ]
       if (s.alerts.length > 0) lines.push(`alerts:\n${s.alerts.map((a) => `  [${a.level}] ${a.code}: ${a.message}`).join('\n')}`)

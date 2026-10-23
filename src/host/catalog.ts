@@ -15,6 +15,12 @@ export interface IndexLimits {
 
 export const INDEX_LIMITS: IndexLimits = { maxLines: 200, maxBytes: 25_600 }
 
+/** 文件行数（末尾换行不额外算一行）。stats 与 INDEX 头部共用，避免两处口径漂移。 */
+export function lineCount(text: string): number {
+  if (text.length === 0) return 0
+  return text.endsWith('\n') ? text.split('\n').length - 1 : text.split('\n').length
+}
+
 /** INDEX.md 的分组顺序 = 裁剪优先级，越前越不该被裁 */
 const GROUP_ORDER = ['feedback', 'persona', 'preference', 'relations', 'project', 'reference', 'procedure'] as const
 
@@ -59,12 +65,23 @@ export function renderIndex(entries: Entry[], limits: IndexLimits = INDEX_LIMITS
     groups.push({ kind, label: kind, rows: sorted.map((e) => `- [${e.meta.title}](${e.rel}) — ${e.meta.summary}`), omitted: 0 })
   }
 
-  const header = (omittedTotal: number, bytes: number) =>
+  const header = (omittedTotal: number, bytes: number, lines: number) =>
     [
       GENERATED_HEADER,
-      `<!-- entries: ${active.length} · omitted: ${omittedTotal} · bytes: ${bytes} / ${limits.maxBytes} · lines: ${limits.maxLines} -->`,
+      `<!-- entries: ${active.length} · omitted: ${omittedTotal} · bytes: ${bytes} / ${limits.maxBytes} · lines: ${lines} / ${limits.maxLines} -->`,
       '',
     ].join('\n')
+
+  // 头部里的数字本身也占字节：迭代到稳定，保证报出的就是文件实际值
+  const render = (body: string, omittedTotal: number): string => {
+    let text = `${header(omittedTotal, 0, 0)}\n${body}\n`
+    for (let pass = 0; pass < 4; pass++) {
+      const next = `${header(omittedTotal, Buffer.byteLength(text, 'utf8'), lineCount(text))}\n${body}\n`
+      if (next === text) break
+      text = next
+    }
+    return text
+  }
 
   // 先按全量渲染，超预算再从最后一个分组开始整行裁剪（被裁数量写进头部，可观测不静默）
   let omittedTotal = 0
@@ -76,10 +93,8 @@ export function renderIndex(entries: Entry[], limits: IndexLimits = INDEX_LIMITS
         return [`## ${g.label} (${shown.length + g.omitted})`, ...shown, ...tail].join('\n')
       })
       .join('\n\n')
-    const text = `${header(omittedTotal, Buffer.byteLength(body, 'utf8'))}\n${body}\n`
-    const lines = text.split('\n').length
-    const bytes = Buffer.byteLength(text, 'utf8')
-    if (lines <= limits.maxLines && bytes <= limits.maxBytes) return text
+    const text = render(body, omittedTotal)
+    if (lineCount(text) <= limits.maxLines && Buffer.byteLength(text, 'utf8') <= limits.maxBytes) return text
 
     // 从优先级最低的分组开始裁
     for (let i = groups.length - 1; i >= 0; i--) {
@@ -91,7 +106,12 @@ export function renderIndex(entries: Entry[], limits: IndexLimits = INDEX_LIMITS
       }
     }
   }
-  return header(omittedTotal, 0) + '\n(index over budget even after trimming; run /memory doctor)\n'
+  return [
+    GENERATED_HEADER,
+    `<!-- entries: ${active.length} · omitted: ${omittedTotal} · OVER BUDGET -->`,
+    '(index over budget even after trimming; run /memory doctor)',
+    '',
+  ].join('\n')
 }
 
 const GROUP_LABEL: Record<string, string> = {

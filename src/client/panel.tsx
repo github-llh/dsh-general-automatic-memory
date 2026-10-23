@@ -438,19 +438,27 @@ function Overview(props: CommonProps & { onBrowseKind: (kind: string) => void })
     )
   }
 
+  const inject = stats.recall.inject
+  const tool = stats.recall.tool
   const share = stats.recall.lastShare
+  const shareMeasured = stats.recall.lastShareAt !== null
   const cap = stats.recall.maxShare || 0.03
   const shareRatio = cap > 0 ? share / cap : 0
-  const verbatimRate = stats.recall.inject.events > 0 ? stats.recall.inject.verbatim / stats.recall.inject.events : 1
-  const zeroHitRate = stats.recall.tool.events > 0 ? stats.recall.tool.zeroHit / stats.recall.tool.events : 0
-  const errors = stats.alerts.filter((alert) => alert.level === 'error').length + stats.issues.length
+  const verbatimRate = inject.events > 0 ? inject.verbatim / inject.events : null
+  const zeroHitRate = tool.events > 0 ? tool.zeroHit / tool.events : null
+  // 文件解析问题由 buildAlerts 转成 entry-invalid 告警；这里只按 issues 计一次，
+  // 不能把「issues + 同源 alerts」相加，否则同一个问题会被算两遍。
+  const errors = stats.issues.length + stats.alerts.filter((alert) => alert.level === 'error' && alert.code !== 'entry-invalid').length
   const warns = stats.alerts.filter((alert) => alert.level === 'warn').length
   const healthTone: Tone = errors > 0 ? 'danger' : warns > 0 ? 'warn' : 'success'
   const kindEntries = Object.entries(stats.byKind).sort((a, b) => b[1] - a[1])
+  const visibleAlerts = stats.alerts.filter((alert) => alert.code !== 'entry-invalid')
   const writes = recent
     .filter((row) => row.act === 'write' || row.act === 'update' || row.act === 'invalidate' || row.act === 'import' || row.act === 'restore')
     .slice(0, 7)
   const attentionCount = errors + warns + pending.length
+  const cacheTone: Tone = verbatimRate === null ? 'accent' : verbatimRate < 0.5 ? 'danger' : 'success'
+  const recallTone: Tone = zeroHitRate === null ? 'accent' : zeroHitRate > 0.5 ? 'warn' : 'success'
 
   return (
     <div className="gam-page">
@@ -505,8 +513,8 @@ function Overview(props: CommonProps & { onBrowseKind: (kind: string) => void })
       <div className="gam-statgrid">
         <StatCard
           label={t('overview.budget')}
-          value={(share * 100).toFixed(2)}
-          unit="%"
+          value={shareMeasured ? (share * 100).toFixed(2) : '—'}
+          unit={shareMeasured ? '%' : undefined}
           action={<IconInfo size={14} className="gam-faint" />}
           aside={
             <Button size="sm" variant="ghost" onClick={() => setCatalogOpen(true)}>
@@ -516,27 +524,37 @@ function Overview(props: CommonProps & { onBrowseKind: (kind: string) => void })
           footer={
             <>
               <div className="gam-stat-row"><span>{t('overview.budgetShare')}</span><b>{(cap * 100).toFixed(1)}%</b></div>
+              <div className="gam-stat-row">
+                <span>{t('overview.measuredAt')}</span>
+                <b title={shareMeasured ? formatDateTime(stats.recall.lastShareAt) : undefined}>
+                  {shareMeasured ? formatRelative(stats.recall.lastShareAt) : t('overview.notMeasured')}
+                </b>
+              </div>
               <div className="gam-stat-row"><span>INDEX</span><b>{stats.index.lines}/{stats.index.maxLines} lines</b></div>
               <div className="gam-stat-row"><span>{t('overview.bytes')}</span><b>{formatBytes(stats.index.bytes)}</b></div>
             </>
           }
         >
-          <Meter value={shareRatio} tone={shareRatio > 1 ? 'danger' : 'accent'} />
+          <Meter value={shareMeasured ? shareRatio : 0} tone={shareMeasured && shareRatio > 1 ? 'danger' : 'accent'} />
         </StatCard>
 
         <StatCard
           label={t('overview.cacheHealth')}
-          value={`${(verbatimRate * 100).toFixed(0)}`}
-          unit="%"
+          value={verbatimRate === null ? '—' : (verbatimRate * 100).toFixed(0)}
+          unit={verbatimRate === null ? undefined : '%'}
           footer={
             <>
-              <div className="gam-stat-row"><span>{t('overview.verbatimRate')}</span><b>{stats.recall.inject.verbatim}/{stats.recall.inject.events}</b></div>
-              <div className="gam-stat-row"><span>{t('overview.injectChars')}</span><b>{formatNumber(stats.recall.inject.chars)}</b></div>
-              <div className="gam-stat-row"><span>{t('overview.injectTokens')}</span><b>{formatNumber(stats.recall.inject.tokens)}</b></div>
+              <div className="gam-stat-row">
+                <span>{t('overview.verbatimRate')}</span>
+                <b>{verbatimRate === null ? '—' : `${formatNumber(inject.verbatim)}/${formatNumber(inject.events)}`}</b>
+              </div>
+              <div className="gam-stat-row"><span>{t('overview.prefixBreaks')}</span><b>{formatNumber(inject.prefixBreaks)}</b></div>
+              <div className="gam-stat-row"><span>{t('overview.injectChars')}</span><b>{formatNumber(inject.chars)}</b></div>
+              <div className="gam-stat-row"><span>{t('overview.injectTokens')}</span><b>{formatNumber(inject.tokens)}</b></div>
             </>
           }
         >
-          <Meter value={verbatimRate} tone={verbatimRate < 0.5 && stats.recall.inject.events > 20 ? 'danger' : 'success'} />
+          <Meter value={verbatimRate ?? 0} tone={cacheTone} />
         </StatCard>
 
         <StatCard
@@ -552,7 +570,7 @@ function Overview(props: CommonProps & { onBrowseKind: (kind: string) => void })
           }
         >
           <div className="gam-tagrow" style={{ marginTop: 9 }}>
-            {kindEntries.slice(0, 4).map(([kind, count]) => (
+            {kindEntries.map(([kind, count]) => (
               <span className="gam-tag" key={kind}>{kindLabel(t, kind)} {count}</span>
             ))}
           </div>
@@ -560,18 +578,27 @@ function Overview(props: CommonProps & { onBrowseKind: (kind: string) => void })
 
         <StatCard
           label={t('overview.recall')}
-          value={formatNumber(stats.recall.tool.events)}
+          value={formatNumber(tool.events)}
           unit={t('overview.callsUnit')}
           footer={
             <>
-              <div className="gam-stat-row"><span>{t('overview.zeroHit')}</span><b>{(zeroHitRate * 100).toFixed(0)}%</b></div>
-              <div className="gam-stat-row"><span>{t('overview.injectHits')}</span><b>{formatNumber(stats.recall.inject.hits)}</b></div>
-              <div className="gam-stat-row"><span>{t('overview.gated')}</span><b>{formatNumber(stats.recall.inject.gated)}</b></div>
-              <div className="gam-stat-row"><span>{t('overview.hits')}</span><b>{formatNumber(stats.recall.tool.hits)}</b></div>
+              <div className="gam-stat-row">
+                <span>{t('overview.zeroHit')}</span>
+                <b>{zeroHitRate === null ? '—' : `${(zeroHitRate * 100).toFixed(0)}%`}</b>
+              </div>
+              <div className="gam-stat-row"><span>{t('overview.toolHits')}</span><b>{formatNumber(tool.hits)}</b></div>
+              <div className="gam-stat-row">
+                <span>{t('overview.gated')}</span>
+                <b>{tool.events > 0 ? formatNumber(tool.gated) : '—'}</b>
+              </div>
+              <div className="gam-stat-row">
+                <span>{t('overview.autoInject')}</span>
+                <b>{interpolate(t('overview.autoInjectValue'), { rounds: formatNumber(inject.events), shown: formatNumber(inject.hits) })}</b>
+              </div>
             </>
           }
         >
-          <Meter value={1 - zeroHitRate} tone={zeroHitRate > 0.5 ? 'warn' : 'success'} />
+          <Meter value={zeroHitRate === null ? 0 : 1 - zeroHitRate} tone={recallTone} />
         </StatCard>
       </div>
 
@@ -630,7 +657,7 @@ function Overview(props: CommonProps & { onBrowseKind: (kind: string) => void })
                   <IconChevronRight size={14} className="gam-faint" />
                 </button>
               ))}
-              {stats.alerts.filter((alert) => !/issues/i.test(alert.code)).slice(0, 3).map((alert) => (
+              {visibleAlerts.slice(0, 3).map((alert) => (
                 <button type="button" className="gam-rowitem" data-static="true" key={alert.code} onClick={() => props.onNavigate('recovery')}>
                   <span className="gam-health-icon" style={{ width: 24, height: 24 }}>
                     {alert.level === 'error' ? <IconAlert size={13} /> : <IconInfo size={13} />}

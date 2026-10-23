@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SnapshotCache, Throttle, renderCatalogLayer, renderSnapshot, renderAlwaysLayer, fingerprintOf } from '../src/host/recall.js'
+import { SnapshotCache, Throttle, renderCatalogLayer, renderSnapshot, renderAlwaysLayer } from '../src/host/recall.js'
 import { MemoryStore } from '../src/host/store.js'
 import type { Entry } from '../src/host/model.js'
 
@@ -63,20 +63,59 @@ describe('原则 P4 · 逐字节幂等（契约测试）', () => {
     expect(renderSnapshot({ entries: entries(20), mode: 'full', budget: BUDGET, ready: true }).text).toBe(text)
   })
 
-  it('returns the identical string instance when the fingerprint matches', () => {
+  it('reuses the identical string instance and reports verbatim on identical text', () => {
     const cache = new SnapshotCache()
     const list = entries(10)
-    const first = cache.get('s1', renderSnapshot({ entries: list, mode: 'full', budget: BUDGET, ready: true }))
-    const second = cache.get('s1', renderSnapshot({ entries: list, mode: 'full', budget: BUDGET, ready: true }))
-    expect(second).toBe(first)
-    expect(cache.wasVerbatim('s1', fingerprintOf(first.text, 'full'))).toBe(true)
+    const first = cache.commit('s1', renderSnapshot({ entries: list, mode: 'full', budget: BUDGET, ready: true }))
+    expect(first.verbatim).toBe(false)
+    expect(first.prefixBreak).toBe(false)
+    const second = cache.commit('s1', renderSnapshot({ entries: list, mode: 'full', budget: BUDGET, ready: true }))
+    expect(second.result).toBe(first.result)
+    expect(second.verbatim).toBe(true)
+    expect(second.prefixBreak).toBe(false)
   })
 
-  it('changes the fingerprint when the content actually changes', () => {
+  it('does not blame the prefix cache for an intentional full→human mode switch', () => {
     const cache = new SnapshotCache()
-    const a = cache.get('s1', renderSnapshot({ entries: entries(10), mode: 'full', budget: BUDGET, ready: true }))
-    const b = cache.get('s1', renderSnapshot({ entries: entries(11), mode: 'full', budget: BUDGET, ready: true }))
-    expect(b.fingerprint).not.toBe(a.fingerprint)
+    const list = entries(10)
+    const full = renderSnapshot({ entries: list, mode: 'full', budget: BUDGET, ready: true })
+    const human = renderSnapshot({ entries: list, mode: 'human', budget: BUDGET, ready: true })
+    expect(human.text).toBe(full.text)
+    expect(human.contentHash).toBe(full.contentHash)
+    expect(human.fingerprint).not.toBe(full.fingerprint)
+    const first = cache.commit('s1', full)
+    const second = cache.commit('s1', human)
+    expect(second.result.text).toBe(first.result.text)
+    expect(second.verbatim).toBe(true)
+    expect(second.prefixBreak).toBe(false)
+  })
+
+  it('counts a same-mode text change as an unexpected prefix break', () => {
+    const cache = new SnapshotCache()
+    const a = cache.commit('s1', renderSnapshot({ entries: entries(10), mode: 'full', budget: BUDGET, ready: true }))
+    const b = cache.commit('s1', renderSnapshot({ entries: entries(11), mode: 'full', budget: BUDGET, ready: true }))
+    expect(b.result.fingerprint).not.toBe(a.result.fingerprint)
+    expect(b.verbatim).toBe(false)
+    expect(b.prefixBreak).toBe(true)
+  })
+
+  it('treats a first-time slim→full layer change as a mode switch, not a break', () => {
+    const cache = new SnapshotCache()
+    const list = entries(10)
+    cache.commit('s1', renderSnapshot({ entries: list, mode: 'slim', budget: BUDGET, ready: true }))
+    const switched = cache.commit('s1', renderSnapshot({ entries: list, mode: 'full', budget: BUDGET, ready: true }))
+    expect(switched.verbatim).toBe(false)
+    expect(switched.prefixBreak).toBe(false)
+  })
+
+  it('keeps the same-mode baseline across slim steps, so a directory change is still a break', () => {
+    const cache = new SnapshotCache()
+    const first = cache.commit('s1', renderSnapshot({ entries: entries(10), mode: 'full', budget: BUDGET, ready: true }))
+    expect(first.prefixBreak).toBe(false)
+    cache.commit('s1', renderSnapshot({ entries: entries(10), mode: 'slim', budget: BUDGET, ready: true }))
+    const changed = cache.commit('s1', renderSnapshot({ entries: entries(11), mode: 'full', budget: BUDGET, ready: true }))
+    expect(changed.verbatim).toBe(false)
+    expect(changed.prefixBreak).toBe(true)
   })
 })
 
@@ -88,10 +127,11 @@ describe('预算与裁剪', () => {
   })
 
   it('keeps the catalog inside its cap and reports what it dropped', () => {
-    const { text, shown, omitted } = renderCatalogLayer(entries(200), 1600)
+    const { text, shown, omitted, ids } = renderCatalogLayer(entries(200), 1600)
     expect(text.length).toBeLessThanOrEqual(1600)
     expect(shown).toBeGreaterThan(0)
     expect(omitted).toBeGreaterThan(0)
+    expect(ids).toHaveLength(shown)
     // 尾行必须告诉模型「目录不完整」，否则它会以为没有更多记忆
     expect(text).toContain(`+${omitted} more via memory_recall`)
   })

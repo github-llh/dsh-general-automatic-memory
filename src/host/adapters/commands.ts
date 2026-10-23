@@ -124,15 +124,18 @@ async function renderStatus(api: MemoryService): Promise<string> {
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .map(([k, n]) => `  ${k}: ${n}`)
     .join('\n')
-  const verbatimRate = s.recall.inject.events > 0 ? s.recall.inject.verbatim / s.recall.inject.events : 0
+  const verbatimRate = s.recall.inject.events > 0 ? s.recall.inject.verbatim / s.recall.inject.events : null
+  const injection = s.recall.lastShareAt
+    ? `${(s.recall.lastShare * 100).toFixed(2)}% of request (cap ${(s.recall.maxShare * 100).toFixed(0)}%, measured ${s.recall.lastShareAt})`
+    : 'not measured yet'
   return [
     `Memory root : ${s.root}`,
     `Entries     : ${s.entryCount}`,
     kinds || '  (none)',
     `Index       : ${s.index.lines}/${s.index.maxLines} lines · ${s.index.bytes}/${s.index.maxBytes} bytes${s.index.overBudget ? ' · OVER BUDGET' : ''}`,
-    `Injection   : ${(s.recall.lastShare * 100).toFixed(2)}% of request (cap ${(s.recall.maxShare * 100).toFixed(0)}%)`,
-    `Prefix cache: verbatim ${(verbatimRate * 100).toFixed(0)}% · inject events ${s.recall.inject.events} · hits ${s.recall.inject.hits}`,
-    `Recall      : tool events ${s.recall.tool.events} · zero-hit ${s.recall.tool.zeroHit} · gated ${s.recall.inject.gated}`,
+    `Injection   : ${injection}`,
+    `Prefix cache: verbatim ${verbatimRate === null ? '—' : `${(verbatimRate * 100).toFixed(0)}%`} · prefix breaks ${s.recall.inject.prefixBreaks} · inject events ${s.recall.inject.events} · catalog entries ${s.recall.inject.hits}`,
+    `Recall      : tool events ${s.recall.tool.events} · hits ${s.recall.tool.hits} · zero-hit ${s.recall.tool.zeroHit} · gated ${s.recall.tool.gated}`,
     `Issues      : ${s.issues.length}`,
     s.alerts.length > 0 ? `Alerts:\n${s.alerts.map((a) => `  [${a.level}] ${a.code}: ${a.message}`).join('\n')}` : 'Alerts      : none',
   ].join('\n')

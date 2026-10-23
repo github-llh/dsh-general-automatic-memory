@@ -74,11 +74,14 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"desc": "Health, injection cost and everything waiting for you — in one place.",
 			"budget": "Injection budget",
 			"budgetShare": "Share cap of request",
+			"measuredAt": "Last measured",
+			"notMeasured": "Not measured yet",
 			"bytes": "Index bytes",
-			"cacheHealth": "Prefix-cache health",
+			"cacheHealth": "Prefix-cache stability",
 			"verbatimRate": "Byte-identical rate",
-			"injectChars": "Injected chars",
-			"injectTokens": "Injected tokens",
+			"prefixBreaks": "Unexpected breaks (total)",
+			"injectChars": "Injected chars (total)",
+			"injectTokens": "Injected tokens (total)",
 			"entries": "Entries",
 			"itemsUnit": "entries",
 			"kinds": "Kinds",
@@ -88,7 +91,9 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"callsUnit": "calls",
 			"zeroHit": "Zero-hit rate",
 			"gated": "Gated out",
-			"hits": "Hits",
+			"toolHits": "Tool hits",
+			"autoInject": "Auto-injected",
+			"autoInjectValue": "{rounds} injections · {shown} shown",
 			"kindDistribution": "Memory makeup",
 			"kindDistributionHint": "Click a kind to browse it",
 			"noEntries": "No entries to summarize yet.",
@@ -116,16 +121,15 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"shown": "Injected",
 			"omitted": "Omitted",
 			"emptyCatalog": "The catalog layer is empty: no always-on or on-demand entries yet.",
-			"allClear": "All clear",
-			"allClearDesc": "No alerts. Injection budget and index are both healthy.",
+			"allClear": "No alerts",
+			"allClearDesc": "Injection budget, index and write queue are all healthy.",
 			"errorsFound": "{n} issues need attention",
 			"warningsFound": "{n} warnings",
 			"errors": "errors",
 			"warnings": "warnings",
 			"pending": "pending",
 			"fixNow": "Check and fix",
-			"doctorDone": "Check complete · {n} derived files rebuilt",
-			"injectHits": "Injected hits"
+			"doctorDone": "Check complete · {n} derived files rebuilt"
 		},
 		browse: {
 			"desc": "Search, filter and edit long-term memory directly.",
@@ -604,11 +608,14 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"desc": "记忆系统的健康、注入成本与待处理事项，一处看完。",
 			"budget": "注入预算",
 			"budgetShare": "占请求比例上限",
+			"measuredAt": "最近实测",
+			"notMeasured": "尚未实测",
 			"bytes": "索引字节",
-			"cacheHealth": "前缀缓存健康",
-			"verbatimRate": "逐字节复读率",
-			"injectChars": "注入字符",
-			"injectTokens": "注入 tokens",
+			"cacheHealth": "前缀缓存稳定率",
+			"verbatimRate": "逐字节稳定率",
+			"prefixBreaks": "累计意外漂移",
+			"injectChars": "累计注入字符",
+			"injectTokens": "累计注入 tokens",
 			"entries": "条目",
 			"itemsUnit": "条",
 			"kinds": "类型",
@@ -618,7 +625,9 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"callsUnit": "次调用",
 			"zeroHit": "零命中率",
 			"gated": "被门控裁掉",
-			"hits": "命中",
+			"toolHits": "工具命中",
+			"autoInject": "自动注入",
+			"autoInjectValue": "{rounds} 轮 · {shown} 条展示",
 			"kindDistribution": "记忆构成",
 			"kindDistributionHint": "点击类型直接浏览",
 			"noEntries": "还没有可统计的条目。",
@@ -646,16 +655,15 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 			"shown": "已注入",
 			"omitted": "已省略",
 			"emptyCatalog": "目录层为空：还没有常驻或按需注入的条目。",
-			"allClear": "一切正常",
-			"allClearDesc": "没有告警，注入预算与索引都在健康区间。",
+			"allClear": "没有告警",
+			"allClearDesc": "注入预算、索引与写入队列都在健康区间。",
 			"errorsFound": "发现 {n} 个需要处理的问题",
 			"warningsFound": "{n} 个警告",
 			"errors": "错误",
 			"warnings": "警告",
 			"pending": "待确认",
 			"fixNow": "体检并修复",
-			"doctorDone": "体检完成 · 重建 {n} 个派生文件",
-			"injectHits": "注入命中"
+			"doctorDone": "体检完成 · 重建 {n} 个派生文件"
 		},
 		browse: {
 			"desc": "搜索、筛选与直接编辑长期记忆。",
@@ -6841,17 +6849,23 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SkeletonList, { rows: 3 })
 			]
 		});
+		const inject = stats.recall.inject;
+		const tool = stats.recall.tool;
 		const share = stats.recall.lastShare;
+		const shareMeasured = stats.recall.lastShareAt !== null;
 		const cap = stats.recall.maxShare || .03;
 		const shareRatio = cap > 0 ? share / cap : 0;
-		const verbatimRate = stats.recall.inject.events > 0 ? stats.recall.inject.verbatim / stats.recall.inject.events : 1;
-		const zeroHitRate = stats.recall.tool.events > 0 ? stats.recall.tool.zeroHit / stats.recall.tool.events : 0;
-		const errors = stats.alerts.filter((alert) => alert.level === "error").length + stats.issues.length;
+		const verbatimRate = inject.events > 0 ? inject.verbatim / inject.events : null;
+		const zeroHitRate = tool.events > 0 ? tool.zeroHit / tool.events : null;
+		const errors = stats.issues.length + stats.alerts.filter((alert) => alert.level === "error" && alert.code !== "entry-invalid").length;
 		const warns = stats.alerts.filter((alert) => alert.level === "warn").length;
 		const healthTone = errors > 0 ? "danger" : warns > 0 ? "warn" : "success";
 		const kindEntries = Object.entries(stats.byKind).sort((a, b) => b[1] - a[1]);
+		const visibleAlerts = stats.alerts.filter((alert) => alert.code !== "entry-invalid");
 		const writes = recent.filter((row) => row.act === "write" || row.act === "update" || row.act === "invalidate" || row.act === "import" || row.act === "restore").slice(0, 7);
 		const attentionCount = errors + warns + pending.length;
+		const cacheTone = verbatimRate === null ? "accent" : verbatimRate < .5 ? "danger" : "success";
+		const recallTone = zeroHitRate === null ? "accent" : zeroHitRate > .5 ? "warn" : "success";
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			className: "gam-page",
 			children: [
@@ -6912,8 +6926,8 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StatCard, {
 							label: t("overview.budget"),
-							value: (share * 100).toFixed(2),
-							unit: "%",
+							value: shareMeasured ? (share * 100).toFixed(2) : "—",
+							unit: shareMeasured ? "%" : void 0,
 							action: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IconInfo, {
 								size: 14,
 								className: "gam-faint"
@@ -6931,6 +6945,13 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.measuredAt") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", {
+										title: shareMeasured ? formatDateTime(stats.recall.lastShareAt) : void 0,
+										children: shareMeasured ? formatRelative(stats.recall.lastShareAt) : t("overview.notMeasured")
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "gam-stat-row",
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "INDEX" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("b", { children: [
 										stats.index.lines,
 										"/",
@@ -6944,35 +6965,35 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 								})
 							] }),
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Meter, {
-								value: shareRatio,
-								tone: shareRatio > 1 ? "danger" : "accent"
+								value: shareMeasured ? shareRatio : 0,
+								tone: shareMeasured && shareRatio > 1 ? "danger" : "accent"
 							})
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StatCard, {
 							label: t("overview.cacheHealth"),
-							value: `${(verbatimRate * 100).toFixed(0)}`,
-							unit: "%",
+							value: verbatimRate === null ? "—" : (verbatimRate * 100).toFixed(0),
+							unit: verbatimRate === null ? void 0 : "%",
 							footer: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.verbatimRate") }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("b", { children: [
-										stats.recall.inject.verbatim,
-										"/",
-										stats.recall.inject.events
-									] })]
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.verbatimRate") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: verbatimRate === null ? "—" : `${formatNumber(inject.verbatim)}/${formatNumber(inject.events)}` })]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.injectChars") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(stats.recall.inject.chars) })]
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.prefixBreaks") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(inject.prefixBreaks) })]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.injectTokens") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(stats.recall.inject.tokens) })]
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.injectChars") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(inject.chars) })]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "gam-stat-row",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.injectTokens") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(inject.tokens) })]
 								})
 							] }),
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Meter, {
-								value: verbatimRate,
-								tone: verbatimRate < .5 && stats.recall.inject.events > 20 ? "danger" : "success"
+								value: verbatimRate ?? 0,
+								tone: cacheTone
 							})
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StatCard, {
@@ -6996,7 +7017,7 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "gam-tagrow",
 								style: { marginTop: 9 },
-								children: kindEntries.slice(0, 4).map(([kind, count]) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								children: kindEntries.map(([kind, count]) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 									className: "gam-tag",
 									children: [
 										kindLabel(t, kind),
@@ -7008,29 +7029,32 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(StatCard, {
 							label: t("overview.recall"),
-							value: formatNumber(stats.recall.tool.events),
+							value: formatNumber(tool.events),
 							unit: t("overview.callsUnit"),
 							footer: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.zeroHit") }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("b", { children: [(zeroHitRate * 100).toFixed(0), "%"] })]
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.zeroHit") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: zeroHitRate === null ? "—" : `${(zeroHitRate * 100).toFixed(0)}%` })]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.injectHits") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(stats.recall.inject.hits) })]
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.toolHits") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(tool.hits) })]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.gated") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(stats.recall.inject.gated) })]
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.gated") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: tool.events > 0 ? formatNumber(tool.gated) : "—" })]
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "gam-stat-row",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.hits") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: formatNumber(stats.recall.tool.hits) })]
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: t("overview.autoInject") }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: interpolate(t("overview.autoInjectValue"), {
+										rounds: formatNumber(inject.events),
+										shown: formatNumber(inject.hits)
+									}) })]
 								})
 							] }),
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Meter, {
-								value: 1 - zeroHitRate,
-								tone: zeroHitRate > .5 ? "warn" : "success"
+								value: zeroHitRate === null ? 0 : 1 - zeroHitRate,
+								tone: recallTone
 							})
 						})
 					]
@@ -7153,7 +7177,7 @@ window.__ModuleLoader__.load({ id: "dsh-general-automatic-memory", factory: (req
 										})
 									]
 								}, `${issue.rel}:${issue.issue}`)),
-								stats.alerts.filter((alert) => !/issues/i.test(alert.code)).slice(0, 3).map((alert) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								visibleAlerts.slice(0, 3).map((alert) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 									type: "button",
 									className: "gam-rowitem",
 									"data-static": "true",

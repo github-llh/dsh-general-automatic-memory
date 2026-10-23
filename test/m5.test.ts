@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -179,6 +179,52 @@ describe('召回统计持久化', () => {
     expect(recall.tool.events).toBe(1)
     expect(recall.tool.hits).toBe(1)
     expect(recall.maxShare).toBe(DEFAULT_CONFIG.budget.maxShareOfRequest)
+  })
+
+  it('persists the measured injection share so a restart does not show a fake 0.00%', async () => {
+    const api = await createService()
+    expect((await api.stats()).recall.lastShareAt).toBeNull()
+    api.setRequestShare(0.0125)
+    await api.flushRecallStats()
+
+    const restarted = await createService()
+    const recall = (await restarted.stats()).recall
+    expect(recall.lastShare).toBe(0.0125)
+    expect(recall.lastShareAt).not.toBeNull()
+  })
+
+  it('migrates v1 stats: gated belongs to tool recall, and an old file has no measured share', async () => {
+    await mkdir(path.join(root, '.cache'), { recursive: true })
+    await writeFile(
+      path.join(root, '.cache', 'recall-stats.json'),
+      JSON.stringify({
+        version: 1,
+        recall: {
+          inject: { events: 3, hits: 4, verbatim: 1, zeroHit: 0, chars: 10, tokens: 2, gated: 5 },
+          tool: { events: 1, hits: 2, zeroHit: 0 },
+          lastShare: 0,
+          maxShare: 0.03,
+        },
+      }),
+      'utf8',
+    )
+    const api = await createService()
+    const recall = (await api.stats()).recall
+    expect(recall.tool.gated).toBe(5)
+    expect(recall.inject.prefixBreaks).toBe(0)
+    expect(recall.lastShareAt).toBeNull()
+  })
+
+  it('counts unexpected same-mode text drift as a prefix break', async () => {
+    const api = await createService()
+    await api.create({ kind: 'project', title: 'A', summary: '第一条', body: 'b', source: 'user-stated' })
+    api.snapshotFor('s1', { mode: 'full' })
+    await api.create({ kind: 'project', title: 'B', summary: '第二条', body: 'b', source: 'user-stated' })
+    api.snapshotFor('s1', { mode: 'full' })
+    const recall = (await api.stats()).recall
+    expect(recall.inject.events).toBe(2)
+    expect(recall.inject.verbatim).toBe(0)
+    expect(recall.inject.prefixBreaks).toBe(1)
   })
 
   it('throttles repeated flushes so the hot path does not hammer the disk', async () => {
